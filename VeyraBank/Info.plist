@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>Accept a contactless payment from your customer's Veyra wallet.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan a merchant's QR code to pay, or scan a receipt QR to save it to your Veyra wallet.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Confirm payments with Face ID.</string>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>VeyraAppleTeamID</key>
+	<string>$(DEVELOPMENT_TEAM)</string>
+	<key>VeyraClientID</key>
+	<string>$(VEYRA_CLIENT_ID)</string>
+	<key>VeyraClientSecret</key>
+	<string>$(VEYRA_CLIENT_SECRET)</string>
+	<key>VeyraPaymentAppProviderID</key>
+	<string>$(VEYRA_PAYMENT_APP_PROVIDER_ID)</string>
+	<key>VeyraTokenRequestorID</key>
+	<string>$(VEYRA_TOKEN_REQUESTOR_ID)</string>
+	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+	<array>
+		<string>A000000891010104</string>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,14 @@
+// Veyra sample app configuration — copy this file to Veyra.xcconfig (same folder) and
+// fill in the values issued to you during Veyra onboarding, then re-run xcodegen.
+// Veyra.xcconfig is git-ignored; never commit real credentials.
+
+// Your Apple Developer Team ID (also used as the App Attest team id).
+DEVELOPMENT_TEAM = YOURTEAMID
+
+// OAuth client credentials (issued by Veyra).
+VEYRA_CLIENT_ID = your-client-id
+VEYRA_CLIENT_SECRET = your-client-secret
+
+// Identifiers assigned to your app at onboarding.
+VEYRA_PAYMENT_APP_PROVIDER_ID = your-payment-app-provider-id
+VEYRA_TOKEN_REQUESTOR_ID = your-token-requestor-id

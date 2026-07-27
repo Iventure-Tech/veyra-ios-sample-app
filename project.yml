@@ -1,0 +1,56 @@
+# Veyra Bank — iOS sample app for the Veyra SDK.
+# Setup: copy Config/Veyra.xcconfig.example to Config/Veyra.xcconfig, fill in your
+# onboarding values, then generate the project:  brew install xcodegen && xcodegen
+name: VeyraBank
+options:
+  bundleIdPrefix: co.veyra
+  deploymentTarget:
+    iOS: "15.0"   # SDK floor
+packages:
+  VeyraSDK:
+    url: https://github.com/Iventure-Tech/veyra-sdk-ios
+    exactVersion: 1.0.1
+targets:
+  VeyraBank:
+    type: application
+    platform: iOS
+    sources: [VeyraBank]
+    configFiles:
+      Debug: Config/Veyra.xcconfig
+      Release: Config/Veyra.xcconfig
+    dependencies:
+      - package: VeyraSDK
+        product: VeyraSDK
+      - package: VeyraSDK
+        product: VeyraSoftPOS
+      - package: VeyraSDK
+        product: VeyraWallet
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: co.veyra.bank.ios
+        # DEVELOPMENT_TEAM comes from Config/Veyra.xcconfig (your Apple Team ID).
+        CODE_SIGN_STYLE: Automatic
+    # Explicit Info.plist (replaces GENERATE_INFOPLIST_FILE): the tap-acceptance rail needs
+    # the CoreNFC ISO7816 AID declaration, which has no INFOPLIST_KEY_ build-setting form.
+    info:
+      path: VeyraBank/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NFCReaderUsageDescription: Accept a contactless payment from your customer's Veyra wallet.
+        # Wallet scan-to-pay (customer side): camera scans the merchant's QR; Face ID confirms
+        # the payment. The camera also scans receipt QRs to save them to the wallet.
+        NSCameraUsageDescription: Scan a merchant's QR code to pay, or scan a receipt QR to save it to your Veyra wallet.
+        NSFaceIDUsageDescription: Confirm payments with Face ID.
+        # Veyra AID only — the app reads Veyra's own payment application, no scheme cards.
+        com.apple.developer.nfc.readersession.iso7816.select-identifiers:
+          - "A000000891010104"
+        # Injected from Config/Veyra.xcconfig; read by SampleConfig at launch.
+        VeyraClientID: $(VEYRA_CLIENT_ID)
+        VeyraClientSecret: $(VEYRA_CLIENT_SECRET)
+        VeyraPaymentAppProviderID: $(VEYRA_PAYMENT_APP_PROVIDER_ID)
+        VeyraTokenRequestorID: $(VEYRA_TOKEN_REQUESTOR_ID)
+        VeyraAppleTeamID: $(DEVELOPMENT_TEAM)
+    entitlements:
+      path: VeyraBank/VeyraBank.entitlements
+      properties:
+        com.apple.developer.nfc.readersession.formats: [TAG]

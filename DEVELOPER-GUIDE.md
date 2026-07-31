@@ -190,7 +190,6 @@ let walletConfig = VeyraWalletConfiguration(
 | `paymentAppProviderID` | **Mandatory for wallet operations** | Your payment-app provider identifier (eligibility/digitise fail without it). |
 | `tokenRequestorID` | **Mandatory for wallet operations** | Scheme-assigned token requestor ID. |
 | `appleTeamID` | **Mandatory** | Your app's Apple Developer Team ID (e.g. `"ABCDE12345"`). Together with the bundle ID it forms the App Attest app ID (`teamID.bundleID`) that device attestation binds to and the backend verifies — it attests **your** app, so this is your team, not Veyra's. Digitise fails fast if missing. |
-| `deviceType` | Optional | Override for the device type reported to the backend. Normally leave `nil` — the SDK auto-detects it (iPad → `TABLET`, otherwise `MOBILE`). |
 | `bundleID` | Optional | Override for the app's bundle ID (the attestation binding suffix). Normally leave `nil` — auto-detected from `Bundle.main`. |
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `httpLoggingEnabled` | Optional | HTTP debug logging. Default `false`; never enable in production. |
@@ -211,7 +210,8 @@ Server hosts and endpoint paths are resolved by the SDK from the environment —
 
 ### Device type
 
-**Detected, not configured** — the SDK reports `TABLET` on iPad and `MOBILE` otherwise. The optional `deviceType` configuration parameter exists only as an override; normally leave it `nil`.
+**Detected, not configured** — the SDK reports `TABLET` on iPad and `MOBILE` otherwise.
+There is no configuration parameter for it.
 
 ---
 

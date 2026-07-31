@@ -73,7 +73,7 @@ In Xcode, open *File → Add Package Dependencies*, paste the repository URL, an
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "1.0.4"),
+    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "1.0.5"),
 ]
 ```
 
@@ -1116,3 +1116,14 @@ Camera scan ──► inspectScannedQr
                                         ├─ declined ──► declined screen; history row DECLINED
                                         └─ onlineRequired ──► "connect to the internet", stay on confirm
 ```
+
+## Building with React Native?
+
+Use the official React Native SDK —
+[`veyra-sdk-react-native`](https://www.npmjs.com/package/veyra-sdk-react-native) — and
+its [sample app](https://github.com/Iventure-Tech/veyra-react-native-sample-app), whose
+`DEVELOPER-GUIDE.md` is the canonical React Native guide. Do **not** integrate the
+artifacts documented here directly from React Native: the SDK's automatic payment-mode
+arming follows native screen lifecycle, which a React Native app's JavaScript
+navigation does not exercise — the React Native SDK's session hooks exist precisely to
+bridge that gap.

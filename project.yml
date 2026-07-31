@@ -9,7 +9,7 @@ options:
 packages:
   VeyraSDK:
     url: https://github.com/Iventure-Tech/veyra-sdk-ios
-    exactVersion: 1.0.5
+    exactVersion: 1.0.6
 targets:
   VeyraBank:
     type: application

@@ -55,7 +55,21 @@ The iOS SDK is a Swift package with three products — `VeyraSDK` (combined), `V
 https://github.com/Iventure-Tech/veyra-sdk-ios
 ```
 
-In Xcode, open *File → Add Package Dependencies*, paste that URL, and select the product that matches your integration (`VeyraSDK` for a combined app, `VeyraSoftPOS` for SoftPOS-only, `VeyraWallet` for wallet-only). Release versions are tagged with each SDK release — the version to pin is given in your onboarding/release notes. Or in a `Package.swift`:
+The package wraps a precompiled binary hosted on the Veyra artifact server, which is
+**authenticated** — before resolving the package, add the repository credentials from your
+Veyra onboarding to `~/.netrc` (SwiftPM and Xcode read it when downloading binary targets):
+
+```
+machine repo.veyra.co
+  login your-repo-username
+  password your-repo-password
+```
+
+```bash
+chmod 600 ~/.netrc   # netrc must not be world-readable
+```
+
+In Xcode, open *File → Add Package Dependencies*, paste the repository URL, and select the product that matches your integration (`VeyraSDK` for a combined app, `VeyraSoftPOS` for SoftPOS-only, `VeyraWallet` for wallet-only). Release versions are tagged with each SDK release — the version to pin is given in your onboarding/release notes. Or in a `Package.swift`:
 
 ```swift
 dependencies: [

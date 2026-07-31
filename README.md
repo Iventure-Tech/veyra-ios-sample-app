@@ -21,8 +21,9 @@ per-outcome guidance — lives in this repository.
 
 - Xcode 15+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 - A physical iPhone running iOS 15+ — App Attest and NFC don't work on the simulator.
-- **Veyra onboarding credentials**: OAuth client id/secret, payment app provider id, token
-  requestor id — plus your Apple Developer Team ID. The app talks to the Veyra TEST
+- **Veyra onboarding credentials**: artifact-repository username/password (the SDK's binary
+  is hosted on an authenticated server), OAuth client id/secret, payment app provider id,
+  token requestor id — plus your Apple Developer Team ID. The app talks to the Veyra TEST
   environment.
 - The test account details from your onboarding pack (the prefill identity in
   `VeyraBank/SampleData.swift` is a placeholder — digitisation is checked against the
@@ -31,27 +32,40 @@ per-outcome guidance — lives in this repository.
 ## Run it (5 minutes)
 
 1. Clone this repository.
-2. Copy the configuration template and fill in your onboarding values:
+2. Add the Veyra repository credentials to `~/.netrc` (SwiftPM reads it when downloading
+   the SDK's binary):
+
+   ```
+   machine repo.veyra.co
+     login your-repo-username
+     password your-repo-password
+   ```
+
+   ```bash
+   chmod 600 ~/.netrc
+   ```
+
+3. Copy the configuration template and fill in your onboarding values:
 
    ```bash
    cp Config/Veyra.xcconfig.example Config/Veyra.xcconfig
    # edit Config/Veyra.xcconfig
    ```
 
-3. Optionally update `VeyraBank/SampleData.swift` with your test account details so the
+4. Optionally update `VeyraBank/SampleData.swift` with your test account details so the
    forms prefill usefully.
-4. Generate the project and open it:
+5. Generate the project and open it:
 
    ```bash
    xcodegen
    open VeyraBank.xcodeproj
    ```
 
-5. Select your device and press Run.
+6. Select your device and press Run.
 
 The SDK resolves as a Swift package from
-`https://github.com/Iventure-Tech/veyra-sdk-ios` at a pinned version — no local files,
-no extra setup.
+`https://github.com/Iventure-Tech/veyra-sdk-ios` at a pinned version; its binary downloads
+from the Veyra artifact server using your `~/.netrc` credentials — no local files.
 
 ## Where things are
 

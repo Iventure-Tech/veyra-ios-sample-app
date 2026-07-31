@@ -17,6 +17,15 @@ The full **[Developer Guide](DEVELOPER-GUIDE.md)** — platform requirements, in
 the complete public API reference with async/closure samples, and the error catalogue with
 per-outcome guidance — lives in this repository.
 
+> **Building with React Native? Do not integrate the SDK's framework directly — use the
+> official React Native SDK (`veyra-sdk-react-native`) instead.** The SDK manages the
+> device's payment modes automatically by following native screen lifecycle, which a
+> React Native app's JavaScript navigation does not exercise — and React Native's iOS
+> dependency tooling (CocoaPods autolinking) cannot consume this Swift package. The React
+> Native SDK bridges screen focus into the SDK's mode management and ships the framework
+> in a CocoaPods-compatible form. See
+> https://github.com/Iventure-Tech/veyra-react-native-sample-app.
+
 ## Prerequisites
 
 - Xcode 15+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).

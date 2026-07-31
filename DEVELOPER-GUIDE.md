@@ -161,7 +161,6 @@ let softposConfig = VeyraSoftPOSConfiguration(
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults — no URLs to supply. |
 | `clientID` / `clientSecret` | **Mandatory** | OAuth client credentials. |
-| `httpLoggingEnabled` | Optional | HTTP debug logging to the Xcode console. Default `false`; never enable in production. |
 
 ### `VeyraWalletConfiguration`
 
@@ -192,7 +191,6 @@ let walletConfig = VeyraWalletConfiguration(
 | `appleTeamID` | **Mandatory** | Your app's Apple Developer Team ID (e.g. `"ABCDE12345"`). Together with the bundle ID it forms the App Attest app ID (`teamID.bundleID`) that device attestation binds to and the backend verifies — it attests **your** app, so this is your team, not Veyra's. Digitise fails fast if missing. |
 | `bundleID` | Optional | Override for the app's bundle ID (the attestation binding suffix). Normally leave `nil` — auto-detected from `Bundle.main`. |
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
-| `httpLoggingEnabled` | Optional | HTTP debug logging. Default `false`; never enable in production. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` / `allowedCountryCodes` / `allowedMCCs` | Optional | Provision-context allow-lists. Country codes are ISO 3166-1 numeric, 4-digit zero-padded (`"0566"` Nigeria) — never alpha codes. |
 
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.

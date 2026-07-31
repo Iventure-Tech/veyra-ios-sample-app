@@ -45,8 +45,7 @@ enum SampleConfig {
             softpos: .init(
                 environment: .test,
                 clientID: clientID,
-                clientSecret: clientSecret,
-                httpLoggingEnabled: false // set true while developing to see HTTP lines; never in production
+                clientSecret: clientSecret
             ),
             wallet: .init(
                 environment: .test,
@@ -54,7 +53,6 @@ enum SampleConfig {
                 clientSecret: clientSecret,
                 paymentAppProviderID: paymentAppProviderID,
                 tokenRequestorID: tokenRequestorID,
-                httpLoggingEnabled: false, // set true while developing to see HTTP lines; never in production
                 appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID
                 allowedAcquirerIDs: allowedAcquirerIDs,
                 allowedMerchantIDs: allowedMerchantIDs,

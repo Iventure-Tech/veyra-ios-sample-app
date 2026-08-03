@@ -370,7 +370,10 @@ private struct CardFace: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CARD HOLDER").font(.system(size: 9)).opacity(0.6)
-                    Text(card.accountHolderName.uppercased()).font(.footnote.weight(.medium))
+                    // The SDK derives the card's display name — scheme label + masked last four,
+                    // e.g. "AFRIGO ****1234". Blank on cards digitised before it supplied one.
+                    Text(card.cardHolderName.isEmpty ? "CARDHOLDER" : card.cardHolderName)
+                        .font(.footnote.weight(.medium))
                 }
                 Spacer()
                 if !card.expiry.isEmpty {

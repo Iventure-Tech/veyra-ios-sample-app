@@ -549,7 +549,9 @@ struct GetPaidView: View {
                 .font(.title3).bold().foregroundStyle(.white)
             Text("₦\(Double(scanned.amountMinorUnits) / 100, specifier: "%.2f")")
                 .font(.system(size: 40, weight: .semibold)).foregroundStyle(.white)
-            Text("Card •••• \(scanned.maskedCard) · amount read from the customer's QR")
+            // The QR carries the card's display name ("AFRIGO ****1234"); older QRs carry
+            // none, so fall back to the last four.
+            Text("\(scanned.cardholderName ?? "Card •••• \(scanned.maskedCard)") · amount read from the customer's QR")
                 .font(.footnote).foregroundStyle(.gray)
             Button {
                 chargeCustomerQr(scanned)

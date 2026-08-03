@@ -79,7 +79,7 @@ struct MerchantTransactionsView: View {
                         .foregroundStyle(statusColor(tx.status))
                 }
                 HStack(spacing: 8) {
-                    Text(railLabel(tx.rail))
+                    Text(tx.railLabel)
                         .font(.caption2.weight(.semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.white.opacity(0.12))
@@ -88,6 +88,12 @@ struct MerchantTransactionsView: View {
                     if let t = tx.transactionTime {
                         Text(t).font(.caption2).foregroundStyle(.secondary)
                     }
+                }
+                // Cardholder Name (EMV 5F20) as the card presented it — a Veyra token shows
+                // its display name, e.g. "AFRIGO ****1234". Absent on QR-MPM (the merchant
+                // never reads the card) and on rows recorded before the SDK captured it.
+                if let cardholder = tx.cardholderName, !cardholder.isEmpty {
+                    Text(cardholder).font(.caption2).foregroundStyle(.secondary)
                 }
             }
             // An explicit receipt CTA — an invisible whole-row tap reads as
@@ -127,15 +133,6 @@ struct MerchantTransactionsView: View {
     private func amountText(_ tx: MerchantTransaction) -> String {
         let major = Double(tx.amountMinorUnits) / 100
         return "₦" + String(format: "%.2f", major)
-    }
-
-    private func railLabel(_ rail: String) -> String {
-        switch rail {
-        case "TAP": return "Tap"
-        case "QR_MPM": return "QR"
-        case "QR_CPM": return "Scan"
-        default: return rail
-        }
     }
 
     private func statusColor(_ status: String) -> Color {
@@ -179,6 +176,11 @@ struct ReceiptView: View {
             Text(receipt.merchantName).font(.subheadline.weight(.semibold))
             Text("₦" + receipt.totalAmountFormatted).font(.title3.weight(.bold))
             Text(receipt.maskedToken).font(.footnote).foregroundStyle(.secondary)
+            // The paying card as it presented itself (EMV 5F20) — merchant's copy only;
+            // absent on QR-MPM, where the merchant never reads the card.
+            if let cardholder = receipt.cardholderName, !cardholder.isEmpty {
+                Text(cardholder).font(.footnote).foregroundStyle(.secondary)
+            }
             Text("Show this to the customer to scan into their wallet")
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             Spacer()

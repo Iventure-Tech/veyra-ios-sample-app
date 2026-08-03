@@ -73,7 +73,7 @@ In Xcode, open *File → Add Package Dependencies*, paste the repository URL, an
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "1.0.10"),
+    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "1.0.11"),
 ]
 ```
 
@@ -342,7 +342,7 @@ do {
 session.cancel()
 ```
 
-`session(amountMinorUnits:currencyCode:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`). Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult`: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"`), `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `errorMessage`.
+`session(amountMinorUnits:currencyCode:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`). Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult`: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"`), `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`.
 
 ---
 
@@ -395,7 +395,7 @@ The customer shows a payment QR from their Veyra wallet; the merchant scans it, 
 
 Decode and validate a scanned payload. **A throw means "not a payment QR"** — show a transient hint and stay armed for another scan; it is not a terminal failure.
 
-Returns `ScannedCustomerQr`: `maskedCard` (last 4 for display), `amountMinorUnits` (the QR's own amount — confirm, never re-key), `currencyNumeric`.
+Returns `ScannedCustomerQr`: `maskedCard` (last 4 for display), `amountMinorUnits` (the QR's own amount — confirm, never re-key), `currencyNumeric`, `cardholderName` (the paying card's display name, e.g. `AFRIGO ****1234` — the same value a tap presents; **display only**, it rides outside the QR's cryptogram, so never branch a payment decision on it; `nil` when the QR carries none).
 
 #### `payments.chargeCustomerQr`
 
@@ -425,10 +425,17 @@ The SDK records every payment it takes — tap, get-paid QR and customer-QR char
 
 ```swift
 let transactions = try await VeyraSoftPOS.shared.transactions.history(limit: 50)
-// MerchantTransaction: reference, rail ("TAP" / "QR_MPM" / "QR_CPM"), amountMinorUnits,
+// MerchantTransaction: reference, rail ("TAP" / "QR_MPM" / "QR_CPM"),
+// railLabel ("Tap" / "QR" / "Scan"), amountMinorUnits,
 // currencyNumeric, status ("APPROVED"/"DECLINED"/"PENDING"/"FAILED"), responseCode,
-// transactionTime, transactionID, maskedTokenLast4, transactionHash
+// transactionTime, transactionID, maskedTokenLast4, transactionHash,
+// cardholderName (EMV 5F20 as the card presented it — nil on QR-MPM)
 ```
+
+Each row records the rail that actually took the payment. Display `railLabel` — the SDK derives it
+so the same rail reads identically on iOS, Android and React Native, and an unrecognised rail code
+passes through unchanged rather than being shown as some other rail. Branch on `rail`, not on the
+label.
 
 `PENDING` means the outcome is not yet known (the SDK keeps polling and updates the stored row); `FAILED` means the payment never reached the server. Hide receipt affordances while a row is `PENDING`.
 
@@ -601,7 +608,7 @@ let cards = try await VeyraWallet.shared.tokenisation.tokens()   // [StoredCard]
 let active = try await VeyraWallet.shared.tokenisation.activeToken
 ```
 
-`StoredCard`: `tokenUniqueReference`, `panLastFour`, `maskedPAN`, `expiry` (`MM/YY`), `accountHolderName`, `bankName`, `status`, `requiresActivation`, `isActive`, `requiresOnline`.
+`StoredCard`: `tokenUniqueReference`, `panLastFour`, `maskedPAN`, `expiry` (`MM/YY`), `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `accountHolderName`, `bankName`, `status`, `requiresActivation`, `isActive`, `requiresOnline`.
 
 **`requiresOnline`** — `true` when the card cannot pay until the wallet has been **online** to refresh it. Render the card greyed-out and non-tappable and prompt the user to connect; the flag derives fresh on every read and clears on its own once the SDK's automatic refresh succeeds. There is no manual "refresh keys" call — key management is entirely SDK-owned.
 
@@ -828,6 +835,7 @@ Two kinds of surface, marked throughout:
 | `VeyraWalletError` | `.notConfigured` | Any call before `VeyraWallet.configure(_:)` | Configure at launch. |
 | | `.authenticationFailed(message)` | Face ID / Touch ID / passcode failed or was cancelled — **no payment was attempted**, nothing recorded | Stay on the confirm screen; let the user retry. |
 | | `.onlineRequired(message)` | The card has no usable payment keys — refused **before** any payment/QR is built | Prompt the user to connect to the internet. Pre-empt it: the card already shows `requiresOnline == true` — grey it out. Clears itself after the SDK's automatic refresh. |
+| | `.amountExceedsCardLimit(message)` | The amount is larger than this card can carry in one payment — refused **before** any payment/QR is built | Offer a smaller amount or another card. Unlike `.onlineRequired` this does **not** clear by going online: the per-payment limit is provisioned with the card. |
 | | `.tokenNotActive(message)` | The card's server-side status is not active (e.g. suspended by the issuer) — **no payment was attempted** | Tell the user the card is suspended/inactive. Don't retry locally — payments resume automatically once a status sync sees the card active again. |
 | | `.requestFailed(message)` | Everything else (network, backend, invalid input) | Show `error.localizedDescription` — every case carries its underlying message. |
 | `VeyraSoftPOSError` | `.notConfigured` | Any call before `VeyraSoftPOS.configure(_:)` | Configure at launch. |
@@ -931,6 +939,7 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | Scan rejected (`.expired` / `.badSignature` / …) | Wallet MPM scan | Yes (fresh scan) | End the flow; ask the merchant for a fresh code. Never show a rejected payment on a confirm screen. |
 | `.authenticationFailed` | Wallet payments | Yes | Nothing was sent. Stay on the confirm screen; let the user retry the biometric. |
 | `.onlineRequired` | Wallet payments | After going online | Prompt to connect; the SDK refreshes the card itself. Pre-empt with `requiresOnline` (grey the card out). |
+| `.amountExceedsCardLimit` | Wallet payments | **Not by retrying** | The amount exceeds the card's per-payment limit. Going online does **not** help — offer a smaller amount or another card. |
 | `.tokenNotActive` | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
 | Digitise `"DECLINED"` | Add card | Per `message` | Show the server's message; the flow ends. Common cause: the account falls outside your provision-context allow-lists. |
 | Activation `"FAILURE"` | Activation | Per `message` | Branch on the [known messages](#activation--status--failure-messages): resend on expiry, cool-down on the rate cap, stop entirely on lockout ("contact your issuer"). |
@@ -948,6 +957,7 @@ public struct StoredCard {                  // wallet card display record
     let panLastFour: String
     let maskedPAN: String                   // "•••• •••• •••• 1112"
     let expiry: String                      // "MM/YY"
+    let cardHolderName: String      // "AFRIGO ****1234" — scheme + masked last four, not a person
     let accountHolderName: String
     let bankName: String?
     let status: String                      // e.g. "APPROVED", "APPROVE_REQUIRE_AUTH", "SUSPENDED"
@@ -979,7 +989,11 @@ public struct VerifiedPayment {
     let amount: String                      // "5000.00"
     let amountMinorUnits: Int64; let currencyNumeric: String; let expiryEpochSeconds: Int64
 }
-public struct PaymentOutcome { let approved: Bool; let responseCode: String?; let message: String? }
+public struct PaymentOutcome {
+    let approved: Bool; let responseCode: String?; let message: String?
+    let merchantName: String?                // registered name from the gateway (beats the QR copy)
+    let merchantLocation: String?            // "city, state" from the gateway; nil if not supplied
+}
 public struct PaymentQr {
     let tokenUniqueReference: String
     let payload: String                     // render as the QR
@@ -1012,12 +1026,12 @@ public struct MerchantStatus { let merchantID: String; let status: String? }
 public struct MerchantUpdate { /* see merchant.update */ }
 public struct StoredMerchant { /* full stored profile incl. backend-assigned merchantCategoryCode, terminalID, merchantStatus */ }
 public enum TapPaymentEvent { case cardDetected, unsupportedTarget, ended(outcome: String), result(TapPaymentResult) }
-public struct TapPaymentResult { let status: String; let pan: String?; let errorMessage: String?; let reference: String? }
+public struct TapPaymentResult { let status: String; let pan: String?; let cardholderName: String?; let errorMessage: String?; let reference: String? }
 public struct PaymentContextQR { let txRef: String; let expiry: String?; let kid: String?; let mpmPayload: String }
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }
-public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String }
+public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String; let cardholderName: String? }
 public struct CustomerQrChargeOutcome { let approved: Bool; let responseCode: String?; let transactionID: String?; let reference: String }
-public struct MerchantTransaction { let reference: String; let rail: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String? }
+public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String? }
 public struct MerchantReceipt { let merchantName: String; let merchantAddress: String; let transactionType: String; let totalAmountMinorUnits: Int64; let totalAmountFormatted: String; let maskedToken: String; let reference: String; let transactionHash: String?; let qrPayload: String }
 public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64; let responseCode: String; let merchantStatus: String?; let transactionID: String? }
 ```

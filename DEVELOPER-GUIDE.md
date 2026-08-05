@@ -313,7 +313,7 @@ let status = try await VeyraSoftPOS.shared.merchant.update(
 
 #### `tap.session`
 
-Arm the reader for one sale and wait for the customer's tap. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only real outcomes (approved / declined / pending / error) end the payment.
+Arm the reader for one sale and wait for the customer's tap. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only real outcomes (approved / declined / pending / failed) end the payment.
 
 ```swift
 let session = VeyraSoftPOS.shared.tap.session(amountMinorUnits: 32500) { event in
@@ -851,13 +851,23 @@ Terminal outcomes only — unsupported cards and lost contact **never** produce 
 
 The response codes underneath are shared on the wire across rails; where a code surfaces (`responseCode` fields, history rows), handle it as follows:
 
+> **Read `response_status`, not the code (STORY-98 / ISSUE-140).** Every payment outcome now carries a
+> triple: `response_code` (what the wire said), `response_status` (**what to do**) and
+> `response_status_reason` (why). Branch on `response_status` only — `APPROVED`, `DECLINED`, `FAILED`
+> or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
+> derives a status from the code, and neither should your app: a code you do not recognise is not a
+> decline. `"99"` is retired — an unheard outcome is now `68` (no reply), `06` (the hop we called
+> failed) or `96` (the SDK/service itself threw), all `PENDING`, while `91` (never connected) and
+> `25` (no such transaction) are `FAILED`, meaning nothing happened and a retry is safe.
+
+
 | Code | Meaning | Terminal? | What to do |
 |---|---|---|---|
 | `"00"` | Approved | Yes | Success screen + receipt (`result.reference` → `transactions.receipt(forReference:)`). |
 | `"05"` | Declined by the issuer/server | Yes | Show decline; try another card. A stale customer QR also surfaces as `"05"` on the CPM rail — if the customer's code sat on screen a while, ask them to regenerate and rescan. |
 | `"06"` | Failed before reaching the issuer — validation, cancellation, merchant not active, wrong mode, read failure after the online boundary | Yes (no money moved) | Fix the input/config and re-initiate; `message` says which check failed. |
-| `"99"` | Pending — sent to the issuer, no response received (timeout/network) | Outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
-| `"91"` | Issuer unavailable | Same as `"99"` | Same — poll, don't retry-charge. |
+| `"68"` (was `"99"`) | Pending — sent, no reply received (timeout/network) | Outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
+| `"91"` | Never connected — the request provably never left | **`FAILED`** — nothing happened, retry is safe | Same — poll, don't retry-charge. |
 | `"12"` / `"14"` / `"51"` / `"54"` | Invalid transaction / invalid card / insufficient funds / expired card | Yes | Hard declines — show the reason, try another card. |
 | `"96"` | System malfunction — **ambiguous**: the payment may have failed *or* succeeded with the response lost | Yes, but unresolved | Don't assume failure: poll the transaction status briefly before telling the merchant it failed. |
 

@@ -941,7 +941,7 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 |---|---|---|---|
 | Code `"05"` / status `DECLINED` | Merchant tap / rails | Yes (new attempt) | Show decline; try another card or rail. |
 | Code `"06"` / status `FAILED` | Merchant tap | Yes | Nothing reached the issuer — fix what `message` names (input, config, merchant inactive) and re-initiate. |
-| Code `"99"` / `"91"` / status `PENDING` | Merchant tap | **No — never re-charge** | Outcome unknown at the issuer. Show "processing"; the SDK polls and resolves the history row. Re-charging risks a double charge. |
+| Status `PENDING` (any code: `68`, `06`, `96`, `09`) or `FAILED` with `91` | Merchant tap | **No — never re-charge** | Outcome unknown at the issuer. Show "processing"; the SDK polls and resolves the history row. Re-charging risks a double charge. |
 | Code `"96"` | Any rail | **No — not yet** | Ambiguous: may have succeeded with the response lost. Poll briefly (context status / transaction status / reconcile) before reporting failure. |
 | `EXPIRED` context / `onExpired` fired | Get-paid QR | Yes | The QR died unpaid (never recorded). Blank it, offer a fresh one. |
 | `inspectCustomerQr` throws | Merchant CPM scan | Yes | Not a payment QR — transient hint, stay armed for another scan. |
@@ -1149,3 +1149,60 @@ artifacts documented here directly from React Native: the SDK's automatic paymen
 arming follows native screen lifecycle, which a React Native app's JavaScript
 navigation does not exercise — the React Native SDK's session hooks exist precisely to
 bridge that gap.
+
+### Holding a `PENDING` payment, and being told when it settles
+
+Because the SDK no longer invents terminal outcomes, a tap that gets no answer hands you
+`responseStatus == PENDING`. **That is not a failure and not a decline** — the payment may well have
+completed, so the one thing you must not do is charge again.
+
+What the app should do:
+
+1. **Stay on the confirmation screen** and show "processing". Do not navigate away and do not print a
+   receipt yet.
+2. **Let the SDK resolve it.** It stores the transaction and polls with backoff; you do not have to.
+3. **Finish when it settles** — either from `onTransactionResolved` (below) or by reading the row with
+   `getTransaction(reference)` / `getLastTransactions()`.
+
+A pending row always converges: it becomes `APPROVED`, `DECLINED` or `FAILED` when the backend settles
+it, or it stays `PENDING`. It never turns into a terminal outcome the SDK made up, and there is no
+attempt cap that gives up on it.
+
+**`TRANSACTION_IN_PROCESS_ESCALATED`** is the one reason that changes what *you* do. It means automated
+reconciliation has stopped and a human will settle the payment. Stop any tight loop of your own, tell
+the merchant "we're looking into this", and re-check lazily — next app open, or a long backoff. It will
+still resolve; it just will not resolve in seconds.
+
+#### `onTransactionResolved` — the SDK pushes the answer
+
+```swift
+// The observer is part of the shared KMP surface, exported as a singleton.
+TransactionResolvedObserver.shared.onTransactionResolved { resolution in
+    // resolution.reference   — which payment (you may have more than one pending)
+    // resolution.status      — APPROVED / DECLINED / FAILED (never PENDING)
+    // resolution.reason      — e.g. INSUFFICIENT_FUNDS
+    // resolution.responseCode — the wire literal, for receipts and support
+}
+```
+
+Four things worth knowing before you rely on it:
+
+- **Register once, at start-up** — not per payment. It fires for *any* transaction that resolves,
+  including one started in an earlier app session and settled by a later poll. That is the case that
+  matters most: a tap that resolves after your app was backgrounded or killed.
+- **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
+  read `getLastTransactions()` at start-up. The observer is a convenience over the store, not a delivery
+  guarantee, so keep the read path.
+- **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
+  this separate channel; the two are not alternatives.
+- It is delivered on the main queue, like the payment callback.
+- iOS has no tap rail, so on iOS this fires from the QR rails (MPM settle, CPM charge).
+
+#### When the SDK could not start a payment at all
+
+`sdkErrorCode` is set when nothing was ever attempted — request validation, no merchant profile, a
+mode/arming refusal, a card that could not be read — or when the SDK itself failed. There is **no**
+response code and **no** status in that case, deliberately: a response code asserts that a payment was
+attempted and something answered or failed to, so a fabricated one would invite you to retry something
+that never left the device (and put a made-up code on a receipt). Fix the input and re-initiate.
+

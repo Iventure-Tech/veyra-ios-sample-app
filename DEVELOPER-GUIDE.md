@@ -1200,9 +1200,13 @@ Four things worth knowing before you rely on it:
 
 #### When the SDK could not start a payment at all
 
-`sdkErrorCode` is set when nothing was ever attempted — request validation, no merchant profile, a
-mode/arming refusal, a card that could not be read — or when the SDK itself failed. There is **no**
-response code and **no** status in that case, deliberately: a response code asserts that a payment was
-attempted and something answered or failed to, so a fabricated one would invite you to retry something
-that never left the device (and put a made-up code on a receipt). Fix the input and re-initiate.
+On iOS a payment that was never attempted — request validation, merchant not onboarded, a stale or
+malformed QR — surfaces as a **thrown error** from the call that refused it, not as a payment outcome.
+There is no response code and no status in that case, deliberately: a response code asserts that a
+payment was attempted and something answered or failed to, so a fabricated one would invite you to
+retry something that never left the device (and put a made-up code on a receipt). Fix the input and
+call again — nothing needs reconciling, because nothing was sent.
+
+(`sdkErrorCode` on the payment response is the Android tap rail's equivalent of the same rule; iOS has
+no tap rail, so here the refusal arrives before any response object exists.)
 

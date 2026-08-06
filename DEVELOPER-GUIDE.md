@@ -325,8 +325,10 @@ let session = VeyraSoftPOS.shared.tap.session(amountMinorUnits: 32500) { event i
         // stays armed — transient hint, keep waiting screen up
         hint = "Card not supported — ask for their Veyra wallet and try again"
     case .ended(let outcome):
-        // reader session ended without a card: CANCELLED / TIMEOUT / ERROR / UNAVAILABLE
-        if outcome != "CANCELLED" { state = .failed("Reader ended (\(outcome)) — try again") }
+        // reader session ended without a card — typed, so the switch is compiler-checked:
+        // .cancelled (merchant dismissed the sheet — not an error), .timeout ("no card
+        // presented — try again"), .unavailable (this device cannot accept taps), .error
+        if outcome != .cancelled { state = .failed("Reader ended (\(outcome.rawValue)) — try again") }
     case .result(let result):
         // terminal outcome: result.status APPROVED / DECLINED / PENDING / FAILED
         lastPaymentReference = result.reference   // for the receipt afterwards
@@ -561,7 +563,7 @@ let response = try await VeyraWallet.shared.tokenisation.requestActivationCode(
     tokenUniqueReference: ref, method: .maskedMobilePhone, reason: .addCard)
 ```
 
-`ActivationCodeResponse`: `tokenUniqueReference`, `expirationDateTime` (ISO-8601 — drive your countdown from it), `status` (`SUCCESS` / `FAILURE`), `message`. **Check `status` even inside a successful result.** Codes are limited-attempt and rate-limited — see [Response codes](#response-codes--error-handling).
+`ActivationCodeResponse`: `tokenUniqueReference`, `expirationDateTime` (ISO-8601 — drive your countdown from it), `status` (`SUCCESS` / `FAILURE`), `message`, `failureCode` (typed `ActivationFailureCode`, nil on success) + `failureCodeRaw`. **Check `status` even inside a successful result**, and branch on `failureCode`, never on `message`: `.codeRequestRateLimited` means disable "resend" until later but keep the flow open; `.activationLocked` is terminal — end the flow and point the user at their issuer. Codes are limited-attempt and rate-limited — see [Response codes](#response-codes--error-handling).
 
 #### `activate`
 
@@ -570,7 +572,20 @@ Submit the code the customer received. Success when `status == "SUCCESS"`.
 ```swift
 let response = try await VeyraWallet.shared.tokenisation.activate(
     tokenUniqueReference: ref, activationCode: code)
+switch response.failureCode {
+case nil: navigateToWallet()                       // status == "SUCCESS"
+case .codeInvalid: showError("Wrong code — \(response.attemptsRemaining ?? 0) attempts left")
+case .maxAttemptsExceeded:
+    // The cycle is closed. On .must delete the token and restart the add-card flow;
+    // on .may, deletion is advisory.
+    endActivationCycle(response.recommendDelete)
+case .activationLocked: showLockedTerminal()       // hide both retry and resend
+case .codeExpired: offerResend()
+default: showError(response.message ?? "Activation failed")
+}
 ```
+
+`ActivateResponse` failure fields (all nil on success): `failureCode` — typed `ActivationFailureCode` (`.tokenNotFound`, `.tokenNotActivatable`, `.activationLocked`, `.noPendingActivation`, `.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.invalidRequest`, `.activationFailed`, or `.unknown(raw:)` for a code newer than this SDK); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `.must` / `.may` after an exhausted cycle (delete the dead token rather than leaving it in the card list), nil otherwise (raw values in `failureCodeRaw` / `recommendDeleteRaw`).
 
 #### `observeActivation` (+ pause / resume / stop)
 
@@ -899,17 +914,21 @@ Exactly three values on both eligibility and digitise responses:
 | `"APPROVE_REQUIRE_AUTH"` | Provisioned, needs activation | Run the activation flow with the returned `activationMethods`. |
 | `"DECLINED"` | Refused | Show `message` (it carries the reason — e.g. the account falls outside your configured provision-context allow-lists). Flow ends. |
 
-### Activation — `status` + failure messages
+### Activation — `status` + `failureCode`
 
-`ActivationCodeResponse.status` / `ActivateResponse.status` are `"SUCCESS"` / `"FAILURE"` — **check `status` even when the call itself succeeds.** On failure the reason is in `message`. Known server messages (observable strings — the SDK adds no codes):
+`ActivationCodeResponse.status` / `ActivateResponse.status` are `"SUCCESS"` / `"FAILURE"` — **check `status` even when the call itself succeeds.** On failure, branch on the typed `failureCode` (`message` is display text — never string-match it):
 
-| Message | Meaning | What to do |
+| `failureCode` | Meaning | What to do |
 |---|---|---|
-| *"Activation code expired. Request a new activation code."* | Code lapsed; attempts may remain | Offer "resend code". |
-| *"Maximum activation code attempts exceeded."* | The 3-attempt limit for this code is exhausted | The code is dead — request a fresh one; warn the user to check the contact carefully. |
-| *"Too many activation code requests for this token. Try again later."* | Re-request rate cap (per token, per hour) | Disable "resend" with a cool-down message. |
-| *"No pending activation for this token. Request an activation code first."* | No live code (never requested, or the pending window lapsed) | Request a code first. |
-| *"Activation is locked for this token after repeated failed attempts. Contact your issuer."* | Locked after repeated exhausted cycles | Stop the flow — the issuer must unlock; direct the user to their bank. |
+| `.codeExpired` | Code lapsed; attempts may remain | Offer "resend code". |
+| `.codeInvalid` | Wrong code, attempts remain | Stay on entry; show `attemptsRemaining`. |
+| `.maxAttemptsExceeded` | The 3-attempt limit for this code is exhausted | The cycle is closed; honour `recommendDelete` (`.must`: delete the token and restart add-card; `.may`: advisory). |
+| `.codeRequestRateLimited` | Re-request rate cap (per token, per hour) | Disable "resend" with a cool-down message — do **not** end the flow. |
+| `.noPendingActivation` | No live code (never requested, or the pending window lapsed) | Request a code first. |
+| `.activationLocked` | Locked after repeated exhausted cycles | Terminal — hide both retry and resend; the issuer must unlock; direct the user to their bank. |
+| `.tokenNotFound` / `.tokenNotActivatable` | No activatable token behind the reference | End the flow; re-digitise or contact the issuer. |
+| `.invalidRequest` / `.activationFailed` | Malformed request / server-side activation error | Show `message`; safe to retry `.activationFailed` later. |
+| `.unknown(raw:)` | A code newer than this SDK | Show `message`; log the raw value. |
 
 ### Card lifecycle statuses
 

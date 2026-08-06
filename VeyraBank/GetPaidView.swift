@@ -483,8 +483,8 @@ struct GetPaidView: View {
                 tapState = .waiting
                 tapHint = "Card not supported — ask for their Veyra wallet and try again"
             case .ended(let outcome):
-                if outcome != "CANCELLED" {
-                    tapState = .failed("Reader ended (\(outcome)) — please try again")
+                if outcome != .cancelled {
+                    tapState = .failed("Reader ended (\(outcome.rawValue)) — please try again")
                     scheduleAutoReturn()
                 }
             case .result(let result):

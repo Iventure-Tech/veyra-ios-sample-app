@@ -786,7 +786,7 @@ let history = try await VeyraWallet.shared.tokenisation
     .transactionHistory(tokenUniqueReference: ref, limit: 100)
 ```
 
-`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`.
+`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`.
 
 #### `reconcilePendingTransactions`
 
@@ -1036,6 +1036,8 @@ public struct TokenActivity { let merchantName: String; let amountMinorUnits: In
 public struct TransactionSummary {          // wallet history row
     let merchantName: String; let amountInMinorUnit: Int; let transactionCurrencyCode: String?
     let authorizationStatus: String?        // PENDING / APPROVED / DECLINED / FAILED / nil
+    let responseCode: String?               // the outcome's code, verbatim ("00", "51"...); nil until resolved
+    let responseStatusReason: String?       // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse
     let entryMethod: String?                // "TAP" / "QR_GENERATED" / "QR_SCANNED" / nil
     let merchantLocation: String?; let transactionHash: String?
     let atEpochMillis: Int64?; let merchantTransactionReference: String?; let merchantId: String?
@@ -1060,7 +1062,7 @@ public struct PaymentContextQR { let txRef: String; let expiry: String?; let kid
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }
 public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String; let cardholderName: String? }
 public struct CustomerQrChargeOutcome { let approved: Bool; let responseCode: String?; let transactionID: String?; let reference: String }
-public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String? }
+public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let responseStatusReason: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String? }
 public struct MerchantReceipt { let merchantName: String; let merchantAddress: String; let transactionType: String; let totalAmountMinorUnits: Int64; let totalAmountFormatted: String; let maskedToken: String; let reference: String; let transactionHash: String?; let qrPayload: String }
 public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64; let responseCode: String; let merchantStatus: String?; let transactionID: String? }
 ```

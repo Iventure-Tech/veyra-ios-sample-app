@@ -41,6 +41,14 @@ struct TransactionDetailView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(statusColor)
                 }
+                // Outcome cause + response code, verbatim from the rail that resolved this row;
+                // legacy/unresolved rows carry neither and show nothing rather than a guess.
+                if let reason = tx.responseStatusReason, !reason.isEmpty {
+                    row("Reason") { Text(reason).font(.subheadline) }
+                }
+                if let code = tx.responseCode, !code.isEmpty {
+                    row("Response code") { Text(code).font(.subheadline.monospaced()) }
+                }
                 if let (date, time) = recordedAt {
                     row("Date") { Text(date) }
                     row("Time") { Text(time) }

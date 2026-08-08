@@ -89,6 +89,14 @@ struct MerchantTransactionsView: View {
                         Text(t).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+                // The outcome's stated cause + code, verbatim from the backend (e.g.
+                // "51 · INSUFFICIENT_FUNDS"); unresolved/legacy rows carry neither.
+                if let reason = tx.responseStatusReason, !reason.isEmpty {
+                    Text([tx.responseCode, reason].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else if let code = tx.responseCode, !code.isEmpty {
+                    Text(code).font(.caption2).foregroundStyle(.secondary)
+                }
                 // Cardholder Name (EMV 5F20) as the card presented it — a Veyra token shows
                 // its display name, e.g. "AFRIGO ****1234". Absent on QR-MPM (the merchant
                 // never reads the card) and on rows recorded before the SDK captured it.

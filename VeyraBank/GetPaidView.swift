@@ -6,8 +6,8 @@
 // gateway-signed payment context (payments.createContext), renders it, and polls the
 // context lifecycle until the customer's push settles. Registration/edit lives behind
 // Home's settings gear (MerchantSettingsView), and Home gates this screen until a merchant
-// is registered. Terminal outcomes (approved/declined/failed,
-// both rails) show Done and auto-return to Home after 5s if untouched.
+// is registered. Terminal outcomes (approved/declined/failed, both rails) show Done and hold
+// for 60s before returning to Home on their own.
 import CoreImage.CIFilterBuiltins
 import SwiftUI
 import VeyraSDK
@@ -28,10 +28,11 @@ struct GetPaidView: View {
         case transactions
     }
 
-    /// Once a payment reaches a terminal outcome (approved/declined/failed), the screen returns
-    /// to Home on its own after this delay — the merchant shouldn't have to touch anything
-    /// between customers. Done returns immediately.
-    private static let autoReturnDelayNanos: UInt64 = 5_000_000_000
+    /// Once a payment reaches a terminal outcome (approved/declined/failed), the screen HOLDS for
+    /// this long and then returns to Home on its own — the merchant shouldn't have to touch
+    /// anything between customers, but should have time to read the outcome to the customer.
+    /// Done returns immediately, throughout the hold.
+    private static let autoReturnDelayNanos: UInt64 = 60_000_000_000
 
     @Environment(\.presentationMode) private var presentationMode
     @State private var page: Page = .amountEntry
@@ -53,7 +54,11 @@ struct GetPaidView: View {
     // flips the line when the sweep stamps the answer. Leaving the screen stops the rendering
     // only — the SDK keeps polling, and history/transaction views show the updated state on
     // return. (iOS suspends timers with the app: the sweep runs while the app is alive and
-    // resumes with it — no OS background execution, by design.)
+    // resumes with it — no OS background execution, by design.) Every terminal result holds for
+    // `autoReturnDelayNanos` and then returns Home; while a sale is WAITING (the row says the
+    // bank supports confirmation) that hold is cancelled — the screen must not vanish mid-wait —
+    // and a fresh hold starts once the answer is on screen. Done dismisses immediately at every
+    // point. The watch drives the screen only: it never starts or stops the SDK's polling.
     private enum CreditConfirmState { case waiting, received, unable }
     @State private var creditConfirmState: CreditConfirmState?
     @State private var creditWatchTask: Task<Void, Never>?
@@ -421,11 +426,13 @@ struct GetPaidView: View {
                         // settle itself can't say whether the bank supports it (the contexts
                         // endpoint has no credit fields) — the SDK's settle reconciler learns the
                         // fields from the transaction-status rail moments later and its sweep does
-                        // the polling, so this screen just watches the stored row.
+                        // the polling, so this screen just watches the stored row. The normal 60s
+                        // hold is armed either way; the watch cancels it if the row turns out to
+                        // say the bank supports confirmation.
+                        scheduleAutoReturn()
                         if status.isApproved {
                             watchCreditConfirmation(reference: context.txRef, initialWaiting: false)
                         }
-                        scheduleAutoReturn()
                         break
                     }
                     if status.state == "EXPIRED" {
@@ -543,9 +550,10 @@ struct GetPaidView: View {
         }
     }
 
-    /// A terminal outcome auto-returns to Home after [autoReturnDelayNanos] so the
-    /// merchant lands back on the main menu even without touching the screen; pressing Done
-    /// (or leaving the screen) cancels the timer.
+    // A terminal outcome holds for [autoReturnDelayNanos] and then returns to Home, so the
+    // merchant lands back on the main menu even without touching the screen; pressing Done
+    // (or leaving the screen) cancels the hold and returns immediately.
+
     // ── CPM: scan the customer's payment QR ──────────────────────────────────────────────────
 
     private var customerQrScanner: some View {
@@ -623,15 +631,21 @@ struct GetPaidView: View {
                 )
                 // The approval said the merchant's bank supports credit confirmation —
                 // the SDK's app-scoped sweep is already polling; wait on the result page and
-                // render the stored row until the answer lands.
-                if outcome.approved, outcome.isCreditConfirmationSupported == true {
-                    watchCreditConfirmation(reference: outcome.reference, initialWaiting: true)
+                // render the stored row until the answer lands. The 60s hold is armed for every
+                // terminal outcome; watchCreditConfirmation cancels it while the sale is waiting
+                // and starts a fresh one once the answer is displayed.
+                scheduleAutoReturn()
+                if outcome.approved {
+                    watchCreditConfirmation(
+                        reference: outcome.reference,
+                        initialWaiting: outcome.isCreditConfirmationSupported == true
+                    )
                 }
             } catch {
                 // Transport failure — nothing recorded, so no receipt CTA.
                 page = .customerQrResult(approved: false, detail: error.localizedDescription)
+                scheduleAutoReturn()
             }
-            scheduleAutoReturn()
         }
     }
 
@@ -641,9 +655,16 @@ struct GetPaidView: View {
     /// confirmation (`initialWaiting` when the charge outcome already said so), and flips it to
     /// the terminal state the SDK's sweep stamped ("RECEIVED", or the final 30-day
     /// "UNABLE_TO_CONFIRM" — a mid-window miss is never stored, so the line never lies).
+    ///
+    /// It also owns this result's *hold*, and only the hold (the polling is the SDK's,
+    /// app-scoped). The caller armed the normal 60s hold; entering the waiting state cancels it
+    /// so the screen cannot disappear while the bank is still being asked, and the answer
+    /// arriving starts a fresh 60s hold. A row that never says "supported" simply lets the
+    /// caller's hold expire — there is no separate flag-unknown state.
     private func watchCreditConfirmation(reference: String, initialWaiting: Bool) {
         stopCreditConfirmationWatch()
         creditConfirmState = initialWaiting ? .waiting : nil
+        if initialWaiting { cancelAutoReturn() }
         creditWatchTask = Task { @MainActor in
             while !Task.isCancelled {
                 let row = try? await VeyraSoftPOS.shared.transactions.history(limit: 50)
@@ -651,10 +672,14 @@ struct GetPaidView: View {
                 if let row {
                     if let status = row.creditConfirmationStatus {
                         creditConfirmState = status == "RECEIVED" ? .received : .unable
+                        // The answer is on screen: start a FRESH hold from here.
+                        scheduleAutoReturn()
                         return
                     }
-                    if row.isCreditConfirmationSupported == true {
+                    if row.isCreditConfirmationSupported == true, creditConfirmState != .waiting {
+                        // The flag turned true — hold indefinitely until the bank answers.
                         creditConfirmState = .waiting
+                        cancelAutoReturn()
                     }
                 }
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -694,6 +719,9 @@ struct GetPaidView: View {
                 EmptyView()
             }
             Button("Done") {
+                // Dismiss immediately — and drop the hold, or it would fire from the amount
+                // page a minute later and close the whole Get-paid flow.
+                cancelAutoReturn()
                 stopCreditConfirmationWatch()
                 page = .amountEntry
             }
@@ -712,6 +740,8 @@ struct GetPaidView: View {
         }
     }
 
+    /// Hold the result for [autoReturnDelayNanos], then return Home. Re-callable: a fresh call
+    /// restarts the hold (used when a credit confirmation finally lands on screen).
     private func scheduleAutoReturn() {
         autoReturnTask?.cancel()
         autoReturnTask = Task {
@@ -719,6 +749,13 @@ struct GetPaidView: View {
             guard !Task.isCancelled else { return }
             returnToHome()
         }
+    }
+
+    /// Stop the hold without leaving the screen — the sale is waiting on its bank's credit
+    /// confirmation and must stay visible until it answers (Done still dismisses).
+    private func cancelAutoReturn() {
+        autoReturnTask?.cancel()
+        autoReturnTask = nil
     }
 
     private func returnToHome() {

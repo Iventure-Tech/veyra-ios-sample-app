@@ -431,7 +431,11 @@ let transactions = try await VeyraSoftPOS.shared.transactions.history(limit: 50)
 // railLabel ("Tap" / "QR" / "Scan"), amountMinorUnits,
 // currencyNumeric, status ("APPROVED"/"DECLINED"/"PENDING"/"FAILED"), responseCode,
 // transactionTime, transactionID, maskedTokenLast4, transactionHash,
-// cardholderName (EMV 5F20 as the card presented it — nil on QR-MPM)
+// cardholderName (EMV 5F20 as the card presented it — nil on QR-MPM),
+// creditTransactionID + isCreditConfirmationSupported (the merchant-bank credit's identifier
+// and whether that bank can confirm it — populated on approved sales only),
+// creditConfirmationStatus ("RECEIVED" once the merchant's bank confirmed the funds; nil
+// while unconfirmed — show nothing, never "not received")
 ```
 
 Each row records the rail that actually took the payment. Display `railLabel` — the SDK derives it
@@ -456,6 +460,23 @@ The receipt returns the payload string (`qrPayload`) for you to render, and carr
 #### `transactions.status`
 
 Backend status query by reference: `status(merchantID:merchantTransactionReference:transactionDate:)` (date `YYYY-MM-DD`) → `[TransactionStatus]` (`responseCode`, `amount`, `transactionID`, …). Use the local history for everyday listing; this is for reconciliation against the backend.
+
+#### `transactions.creditConfirmation`
+
+Beneficiary credit confirmation: has the merchant's bank actually **received the funds** of an approved sale? Settlement confirmation only — it never changes the sale's payment outcome.
+
+```swift
+let confirmation = try await VeyraSoftPOS.shared.transactions.creditConfirmation(
+    merchantID: merchantID,
+    creditTransactionID: tx.creditTransactionID!,   // from the history row / payment response
+    amountMinorUnits: tx.amountMinorUnits           // cross-checked by the merchant's bank
+)
+// confirmation.status: "RECEIVED" (terminal — funds are in the merchant's account; amountMinorUnits,
+// creditedAt and bankReference describe the credit) or "UNABLE_TO_CONFIRM" (not confirmed yet — ask
+// again later; the cause rides in message). Treat any unrecognised value like "UNABLE_TO_CONFIRM".
+```
+
+Call it only for sales whose history row carries `creditTransactionID` with `isCreditConfirmationSupported == true`. **Platform note:** on Android the SDK polls this rail in the background (exponential backoff, up to 30 days) and pushes the answer through a callback; iOS has no background poller, so this manual fetch is the iOS surface — poll on your own cadence, stop on `"RECEIVED"`, and treat `"UNABLE_TO_CONFIRM"` as "not confirmed yet", never as "not received".
 
 ---
 
@@ -1062,7 +1083,8 @@ public struct PaymentContextQR { let txRef: String; let expiry: String?; let kid
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }
 public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String; let cardholderName: String? }
 public struct CustomerQrChargeOutcome { let approved: Bool; let responseCode: String?; let transactionID: String?; let reference: String }
-public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let responseStatusReason: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String? }
+public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let responseStatusReason: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?; let creditConfirmationStatus: String? }
+public struct CreditConfirmation { let creditTransactionID: String; let status: String; let amountMinorUnits: Int64?; let creditedAt: String?; let bankReference: String?; let message: String? }
 public struct MerchantReceipt { let merchantName: String; let merchantAddress: String; let transactionType: String; let totalAmountMinorUnits: Int64; let totalAmountFormatted: String; let maskedToken: String; let reference: String; let transactionHash: String?; let qrPayload: String }
 public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64; let responseCode: String; let merchantStatus: String?; let transactionID: String? }
 ```

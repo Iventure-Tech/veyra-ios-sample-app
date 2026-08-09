@@ -97,6 +97,15 @@ struct MerchantTransactionsView: View {
                 } else if let code = tx.responseCode, !code.isEmpty {
                     Text(code).font(.caption2).foregroundStyle(.secondary)
                 }
+                // Whether the merchant's bank confirmed receiving the funds. Absent
+                // while unconfirmed — nothing is shown, never "not received". (iOS has no
+                // background poller; the field reflects what the SDK's store holds, and the
+                // app can refresh it via transactions.creditConfirmation.)
+                if let credit = tx.creditConfirmationStatus, !credit.isEmpty {
+                    Text(credit == "RECEIVED" ? "Funds received by merchant bank" : "Bank credit could not be confirmed")
+                        .font(.caption2)
+                        .foregroundStyle(credit == "RECEIVED" ? Color.green : Color.secondary)
+                }
                 // Cardholder Name (EMV 5F20) as the card presented it — a Veyra token shows
                 // its display name, e.g. "AFRIGO ****1234". Absent on QR-MPM (the merchant
                 // never reads the card) and on rows recorded before the SDK captured it.

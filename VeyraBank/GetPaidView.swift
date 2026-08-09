@@ -44,6 +44,19 @@ struct GetPaidView: View {
     @State private var resultReceipt: MerchantReceipt?
     @State private var resultReceiptError = false
     @State private var autoReturnTask: Task<Void, Never>?
+    // Beneficiary credit confirmation on the CPM and MPM results. Polling is
+    // SDK-owned and app-scoped — never screen-scoped: the SDK's background sweep keeps asking
+    // the merchant's bank (exponential backoff, up to 30 days) for as long as the app runs,
+    // whatever screen is up, and persists each answer to its transaction store. This screen only
+    // RENDERS that store: it re-reads the sale's row every few seconds while a result is
+    // visible, shows "Confirming credit…" once the row says the bank supports confirmation, and
+    // flips the line when the sweep stamps the answer. Leaving the screen stops the rendering
+    // only — the SDK keeps polling, and history/transaction views show the updated state on
+    // return. (iOS suspends timers with the app: the sweep runs while the app is alive and
+    // resumes with it — no OS background execution, by design.)
+    private enum CreditConfirmState { case waiting, received, unable }
+    @State private var creditConfirmState: CreditConfirmState?
+    @State private var creditWatchTask: Task<Void, Never>?
     @State private var customerQrScanHint: String?
     @State private var merchant: StoredMerchant?
     @State private var amountText = ""
@@ -112,6 +125,7 @@ struct GetPaidView: View {
         }
         .onDisappear {
             autoReturnTask?.cancel()
+            stopCreditConfirmationWatch()
         }
         // Entering the amount screen while not active kicks an immediate
         // backend status check so the screen unlocks as soon as the merchant goes active.
@@ -312,12 +326,28 @@ struct GetPaidView: View {
                         .foregroundStyle(.white)
                     Text("Customer paid by QR · \(responseCode ?? "-")")
                         .font(.footnote).foregroundStyle(.gray)
+                    // Beneficiary credit confirmation — waits, then flips when the
+                    // SDK's sweep learns the merchant's bank received the funds.
+                    switch creditConfirmState {
+                    case .waiting:
+                        Text("Confirming credit with merchant bank…")
+                            .font(.footnote).foregroundStyle(.orange)
+                    case .received:
+                        Text("Funds received by merchant bank")
+                            .font(.footnote).foregroundStyle(.green)
+                    case .unable:
+                        Text("Bank credit could not be confirmed")
+                            .font(.footnote).foregroundStyle(.red)
+                    case nil:
+                        EmptyView()
+                    }
                     viewReceiptButton
                 }
             }
             Spacer()
             Button(qrFinished ? "Done" : "Cancel", role: qrFinished ? ButtonRole?.none : .destructive) {
                 qrTask?.cancel()
+                stopCreditConfirmationWatch()
                 if qrFinished {
                     returnToHome()
                 } else {
@@ -329,6 +359,7 @@ struct GetPaidView: View {
         .padding()
         .onDisappear {
             qrTask?.cancel()
+            stopCreditConfirmationWatch()
             // Stop the SDK expiry watch so its callback can't fire into a dismissed view.
             VeyraSoftPOS.shared.payments.cancelQrExpiry()
         }
@@ -347,6 +378,8 @@ struct GetPaidView: View {
         qrTask?.cancel()
         qrState = .creating
         lastPaymentReference = nil
+        stopCreditConfirmationWatch()
+        creditConfirmState = nil
         guard let merchantID = merchant?.merchantID else {
             qrState = .failed("Register as a merchant first")
             scheduleAutoReturn()
@@ -384,6 +417,14 @@ struct GetPaidView: View {
                         // Settled — stop the expiry watch so it can't overwrite the outcome later.
                         VeyraSoftPOS.shared.payments.cancelQrExpiry()
                         qrState = .settled(approved: status.isApproved, responseCode: status.responseCode)
+                        // An approved MPM sale waits on credit confirmation too. The
+                        // settle itself can't say whether the bank supports it (the contexts
+                        // endpoint has no credit fields) — the SDK's settle reconciler learns the
+                        // fields from the transaction-status rail moments later and its sweep does
+                        // the polling, so this screen just watches the stored row.
+                        if status.isApproved {
+                            watchCreditConfirmation(reference: context.txRef, initialWaiting: false)
+                        }
                         scheduleAutoReturn()
                         break
                     }
@@ -569,6 +610,8 @@ struct GetPaidView: View {
     private func chargeCustomerQr(_ scanned: ScannedCustomerQr) {
         page = .chargingCustomerQr
         lastPaymentReference = nil
+        stopCreditConfirmationWatch()
+        creditConfirmState = nil
         Task { @MainActor in
             do {
                 let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(scanned)
@@ -578,12 +621,50 @@ struct GetPaidView: View {
                     approved: outcome.approved,
                     detail: "Customer QR payment · \(outcome.responseCode ?? "-")"
                 )
+                // The approval said the merchant's bank supports credit confirmation —
+                // the SDK's app-scoped sweep is already polling; wait on the result page and
+                // render the stored row until the answer lands.
+                if outcome.approved, outcome.isCreditConfirmationSupported == true {
+                    watchCreditConfirmation(reference: outcome.reference, initialWaiting: true)
+                }
             } catch {
                 // Transport failure — nothing recorded, so no receipt CTA.
                 page = .customerQrResult(approved: false, detail: error.localizedDescription)
             }
             scheduleAutoReturn()
         }
+    }
+
+    /// Render-only credit-confirmation watch (see the state's comment — the SDK owns
+    /// the polling, app-scoped). Re-reads the sale's stored row every few seconds while a result
+    /// is on screen: shows the waiting line once the row says the merchant's bank supports
+    /// confirmation (`initialWaiting` when the charge outcome already said so), and flips it to
+    /// the terminal state the SDK's sweep stamped ("RECEIVED", or the final 30-day
+    /// "UNABLE_TO_CONFIRM" — a mid-window miss is never stored, so the line never lies).
+    private func watchCreditConfirmation(reference: String, initialWaiting: Bool) {
+        stopCreditConfirmationWatch()
+        creditConfirmState = initialWaiting ? .waiting : nil
+        creditWatchTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let row = try? await VeyraSoftPOS.shared.transactions.history(limit: 50)
+                    .first(where: { $0.reference == reference })
+                if let row {
+                    if let status = row.creditConfirmationStatus {
+                        creditConfirmState = status == "RECEIVED" ? .received : .unable
+                        return
+                    }
+                    if row.isCreditConfirmationSupported == true {
+                        creditConfirmState = .waiting
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
+    private func stopCreditConfirmationWatch() {
+        creditWatchTask?.cancel()
+        creditWatchTask = nil
     }
 
     private func customerQrResult(_ approved: Bool, _ detail: String?) -> some View {
@@ -597,14 +678,33 @@ struct GetPaidView: View {
             if let detail {
                 Text(detail).font(.footnote).foregroundStyle(.gray)
             }
-            Button("Done") { page = .amountEntry }
-                .tint(.white)
-                .padding(.top, 12)
+            // Beneficiary credit confirmation — waits, then flips when the SDK's
+            // sweep learns the merchant's bank received the funds.
+            switch creditConfirmState {
+            case .waiting:
+                Text("Confirming credit with merchant bank…")
+                    .font(.footnote).foregroundStyle(.orange)
+            case .received:
+                Text("Funds received by merchant bank")
+                    .font(.footnote).foregroundStyle(.green)
+            case .unable:
+                Text("Bank credit could not be confirmed")
+                    .font(.footnote).foregroundStyle(.red)
+            case nil:
+                EmptyView()
+            }
+            Button("Done") {
+                stopCreditConfirmationWatch()
+                page = .amountEntry
+            }
+            .tint(.white)
+            .padding(.top, 12)
             // The CPM result gets the receipt CTA too (all rails).
             viewReceiptButton
             // Result-screen shortcut into the transactions list.
             Button("View transactions") {
                 autoReturnTask?.cancel()
+                stopCreditConfirmationWatch()
                 page = .transactions
             }
             .font(.footnote)

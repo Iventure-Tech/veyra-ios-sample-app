@@ -384,7 +384,8 @@ let context = try await VeyraSoftPOS.shared.payments.createContext(
     merchantID: merchantID,
     amountMinorUnits: amount,
     currency: "566",
-    onExpired: { qrState = .failed("This payment code has expired — start a new payment") }
+    onExpired: { qrState = .failed("This payment code has expired — start a new payment") },
+    merchantOrderID: "ORDER-42"        // optional: YOUR order id — never a lookup key
 )
 // render context.mpmPayload verbatim as the QR, then poll:
 while !Task.isCancelled {
@@ -419,8 +420,11 @@ Charge the confirmed QR synchronously over the standard payment rail. A tampered
 do {
     let scanned = try await VeyraSoftPOS.shared.payments.inspectCustomerQr(payload)
     confirm(scanned.amountMinorUnits, card: scanned.maskedCard)   // merchant confirms the QR's amount
-    let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(scanned)
-    lastPaymentReference = outcome.reference       // SDK-submitted reference — use for the receipt
+    let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(
+        scanned,
+        merchantOrderID: "ORDER-42"                // optional: YOUR order id — never a lookup key
+    )
+    lastPaymentReference = outcome.reference       // SDK-MINTED reference — use for the receipt
     showResult(approved: outcome.approved, code: outcome.responseCode)
 } catch {
     showHint("Not a payment code — try again")     // stay armed for another scan
@@ -428,6 +432,8 @@ do {
 ```
 
 `CustomerQrChargeOutcome`: `approved: Bool`, `responseCode`, `transactionID`, `reference`, plus `creditTransactionID` + `isCreditConfirmationSupported` (populated on approved charges — the cue to wait for credit confirmation, see `transactions.creditConfirmation`).
+
+> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: optional, echoed back, never validated for uniqueness and never used as a key, so the same value may sit on two attempts of one sale — which is exactly what links a retry to its order. Both `createContext` and `chargeCustomerQr` take it; the tap session does not.
 
 ---
 
@@ -459,9 +465,37 @@ label.
 
 **How the SDK waits for a `PENDING` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own, with **exponential backoff**: the first re-checks come within seconds (most payments settle at once) and the interval doubles to a steady state of roughly **once an hour**. It keeps that up for **30 days** from the transaction date, and then stops asking.
 
-**Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is. ``transactions.reconcilePendingTransactions()`` still works past the window if you need one more check.
+**Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is.
+
+**Let the merchant ask on demand — `transactions.refreshStatus(reference:)`.** The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never invents an outcome — a row that ages out simply stops being asked about and stays `PENDING`. Expose **`refreshStatus`** in your UI so the merchant can ask on demand, which is the route for anything still pending after the window closes.
 
 A failed poll — device offline, gateway unreachable, an unreadable answer — changes nothing at all: the SDK backs off and asks again, and the row is left exactly as it was. "We could not reach the server" is never recorded as "the payment failed".
+
+#### `transactions.refreshStatus(reference:)`
+
+```swift
+// Returns the updated stored row, or nil if this device has no such reference.
+let updated = try await VeyraSoftPOS.shared.transactions.refreshStatus(reference: reference)
+```
+
+The on-demand counterpart to `history(limit:)`, which only reads what the device already knows. It
+asks the gateway about that one transaction now and writes the answer into the same local store the
+background sweep writes, so an on-demand check and a background check can never disagree.
+
+- **Show it only while the row is `PENDING`.** A settled row has nothing to ask, and offering the
+  action implies the outcome might still change. Hide it the moment the row is terminal.
+- **It works past the 30-day window**, and on a row the sweep never had on its list — that is what it
+  is for.
+- **It is not a way to force an outcome.** A payment that is still unsettled answers `PENDING` again.
+  Show a brief "still processing" note; do not retry in a loop.
+- **A failed call throws and changes nothing** — `VeyraSoftPOSError.noNetworkConnection` when the
+  device is offline. Show the error and leave the row pending.
+- **No SDK-side throttle.** Disable your button while a call is in flight, as the sample does.
+
+Distinct from `transactions.status(merchantID:merchantTransactionReference:transactionDate:)`, which
+remains the **raw** query: that one returns whatever the gateway said and writes nothing to the
+store, for developers who want the unfiltered answer. `refreshStatus` is the one that updates the row
+your history screen renders.
 
 **Platform note — the sweep is app-scoped.** It starts when the SDK is configured and runs for as long as the app process is alive, across every in-app navigation and whatever screen is up; no screen starts or stops it. iOS suspends timers when the OS suspends the app, so there is **no OS background execution** — the sweep pauses with the app and resumes on foreground. That costs time, never an answer: every result is written to the store, so a row resolved while you were elsewhere is simply there when you look.
 
@@ -504,6 +538,45 @@ let confirmation = try await VeyraSoftPOS.shared.transactions.creditConfirmation
 - **Merchant-presented QR (MPM):** the context settle carries no credit fields (the contexts endpoint never does); the SDK learns them from the transaction-status rail moments after the settle, so just watch the stored row until `isCreditConfirmationSupported` turns up `true`.
 
 Never show "could not be confirmed" from anything but the stored final give-up: a mid-window miss is never written to the row, so the row never lies.
+
+#### `transactions.refreshCreditConfirmation(reference:)`
+
+The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
+days**, finalising the row as `"UNABLE_TO_CONFIRM"` — which means "we stopped asking", never "the
+funds were not received". Expose **`refreshCreditConfirmation`** in your UI so the merchant can ask on
+demand; it works after the window closes, and a later `"RECEIVED"` replaces the give-up state.
+
+**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
+this rail. `true` means the SDK is polling and you may offer the manual check; `false`/`nil` means
+there is nothing to ask — do not call it, and show no credit UI for that transaction. Offer the
+action only while
+
+```swift
+tx.status == "APPROVED"
+    && tx.isCreditConfirmationSupported == true
+    && tx.creditConfirmationStatus != "RECEIVED"
+```
+
+```swift
+let updated = try await VeyraSoftPOS.shared.transactions
+    .refreshCreditConfirmation(reference: tx.reference)   // MerchantTransaction?, nil if unknown here
+```
+
+- **A row outside that predicate is a no-op**, not an error: no request is made and the unchanged row
+  comes back. The gateway refuses the same cases, so the SDK does not spend a round trip being told.
+- **It works past the 30-day window**, including on a row already stamped `"UNABLE_TO_CONFIRM"` —
+  that is the case it exists for. Nothing ever replaces `"RECEIVED"`.
+- **Only a confirmation is written.** An answer of `"UNABLE_TO_CONFIRM"`, or one this SDK version does
+  not recognise, leaves the row exactly as it was — "not confirmed **yet**", never "not received".
+- **Settlement only.** Nothing on this path can change `status`, `responseCode` or
+  `responseStatusReason`.
+- **This is the one that writes the store**, unlike `transactions.creditConfirmation(...)` above,
+  which stays as the raw fetch and persists nothing — a `"RECEIVED"` learned that way is gone on the
+  next render. It also fires `transactions.onCreditConfirmation`, exactly as the background sweep
+  does, because both go through the same write.
+- **A failed call throws and changes nothing** — `VeyraSoftPOSError.noNetworkConnection` when the
+  device is offline. Show the error and leave the credit line reading "not confirmed yet".
+- **No SDK-side throttle.** Disable your button while a call is in flight, as the sample does.
 
 **Holding the result screen (your app's decision, never the SDK's).** A terminal outcome is a destination, not a notification. The sample holds its result view for **60 seconds** — approved, declined, pending and failed alike — with **Done** visible for the whole hold and dismissing immediately; when the hold expires the view returns Home on its own. The single exception is an approved sale whose `isCreditConfirmationSupported` is (or later becomes) `true`: **cancel** the hold so the view cannot vanish while the merchant's bank is still being asked, show "Confirming credit with merchant bank…", and start a **fresh 60 seconds** once the confirmation is on screen (the merchant-QR rail learns the flag moments after the settle, so the cancel can happen while the hold is already running). Non-terminal tap events (`.unsupportedTarget`, lost contact) are not results — they hold nothing and dismiss nothing: the waiting screen stays up, armed for a re-tap. How long a result stays up and what dismisses it are app concerns end to end — the SDK has no concept of a screen and supplies no duration, and dismissing a view never stops its app-scoped credit polling.
 
@@ -852,9 +925,13 @@ Did the money actually reach the merchant's bank? The wallet asks the same quest
 
 **The SDK does the polling; your view renders the stored row.** Once a payment is approved, an app-scoped sweep started at `configure(_:)` asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`transactionHistory(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
 
+These three fields are the **eligibility contract**: they are how you decide whether to render a
+credit line at all, and whether you may call `refreshCreditConfirmation` (below). They are not merely
+a cue to wait.
+
 | Field | What it means for you |
 |---|---|
-| `isCreditConfirmationSupported: Bool?` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line. `false`/`nil` ⇒ there is nothing to ask — render **no** credit UI for that transaction. |
+| `isCreditConfirmationSupported: Bool?` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line **and may offer the manual check**. `false`/`nil` ⇒ there is nothing to ask — render **no** credit UI for that transaction, and **do not call `refreshCreditConfirmation`**. |
 | `creditConfirmationStatus: String?` | `nil` = no answer yet (with the gate `true`, that is the "confirming…" state) · `"RECEIVED"` = terminal, the funds are confirmed in the merchant's account · `"UNABLE_TO_CONFIRM"` = the 30-day sweep stopped asking. |
 | `creditTransactionID: String?` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — display/support only; never pass it back to the SDK. |
 | `creditedAt: String?` | When the beneficiary bank posted the credit. `"RECEIVED"` only. |
@@ -868,6 +945,41 @@ Two things to get right, because they are easy to get wrong in the user's favour
 The same three core fields, with the same meanings, exist on the SoftPOS side of the SDK — so an app that implements both halves reads one contract.
 
 **The iOS boundary, stated rather than implied:** the sweep is app-scoped, not OS-background. It keeps polling across in-app navigation and resumes when the app returns to the foreground; while the app is suspended it does not run. That costs time, never an answer — the worklist and every result live in the SDK's store.
+
+##### `refreshCreditConfirmation` — let the customer ask on demand
+
+The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
+days**, finalising the row as `"UNABLE_TO_CONFIRM"` — which means "we stopped asking", never "the
+funds were not received". Expose **`refreshCreditConfirmation`** in your UI so the user can ask on
+demand; it works after the window closes, and a later `"RECEIVED"` replaces the give-up state.
+
+**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
+this rail. `true` means the SDK is polling and you may offer the manual check; `false`/`nil` means
+there is nothing to ask — do not call it, and show no credit UI for that transaction. Offer the
+action only while
+
+```swift
+tx.authorizationStatus == "APPROVED"
+    && tx.isCreditConfirmationSupported == true
+    && tx.creditConfirmationStatus != "RECEIVED"
+```
+
+```swift
+let updated = try await VeyraWallet.shared.tokenisation
+    .refreshCreditConfirmation(transactionHash: hash)   // TransactionSummary?, nil if unknown here
+```
+
+- **A row outside that predicate is a no-op**, not an error: no request is made and the unchanged row
+  comes back.
+- **It works past the 30-day window**, including on a row already stamped `"UNABLE_TO_CONFIRM"` —
+  that is the case it exists for. Nothing ever replaces `"RECEIVED"`.
+- **Only a confirmation is written.** Anything else leaves the row exactly as it was.
+- **Settlement only.** Nothing on this path can change `authorizationStatus`, `responseCode` or
+  `responseStatusReason`.
+- **Still no callback** — the returned row and the stored history are the wallet's whole credit
+  surface, by design.
+- **A failed call throws and changes nothing** — `VeyraWalletError.noNetworkConnection` when the
+  device is offline. Show the error and leave the credit line reading "not confirmed yet".
 
 #### `reconcilePendingTransactions`
 
@@ -1147,7 +1259,8 @@ public struct LukState { let usableKeyCount: Int; let refreshDue: Bool }
 public struct TokenActivity { let merchantName: String; let amountMinorUnits: Int64; let currencyNumeric: String; let status: String; let atEpochMillis: Int64 }
 
 public struct TransactionSummary {          // wallet history row
-    let merchantName: String; let amountInMinorUnit: Int; let transactionCurrencyCode: String?
+    let merchantName: String; let amountInMinorUnit: Int64  // Int64 since 1.0.15; was Int
+    let transactionCurrencyCode: String?
     let authorizationStatus: String?        // PENDING / APPROVED / DECLINED / FAILED / nil
     let responseCode: String?               // the outcome's code, verbatim ("00", "51"...); nil until resolved
     let responseStatusReason: String?       // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse

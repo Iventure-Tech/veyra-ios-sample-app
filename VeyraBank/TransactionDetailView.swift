@@ -16,6 +16,9 @@ struct TransactionDetailView: View {
     /// handed. A **store read**, never a poll — the SDK owns the credit polling and keeps asking
     /// whether or not this screen exists.
     @State private var live: TransactionSummary?
+    // In-flight state for the manual "check status" ask.
+    @State private var checkingStatus = false
+    @State private var statusCheckNote: String?
     private var liveRow: TransactionSummary { live ?? tx }
 
     @State private var linkedReceipt: TransactionReceipt?
@@ -23,6 +26,10 @@ struct TransactionDetailView: View {
     @State private var scanning = false
     @State private var processingScan = false
     @State private var scanError: String?
+    // The on-demand credit check's in-flight flag and its transient note (stayed unconfirmed, or
+    // failed). Neither is persisted — the SDK's stored row is the durable state.
+    @State private var checkingCredit = false
+    @State private var creditCheckNote: String?
 
     var body: some View {
         List {
@@ -65,6 +72,33 @@ struct TransactionDetailView: View {
                 if let currency = tx.transactionCurrencyCode, !currency.isEmpty {
                     row("Currency") { Text(currency).font(.subheadline.monospaced()) }
                 }
+
+                // "Check status" — the customer's manual ask beside the SDK's own background poll.
+                // Shown ONLY while the row is still open, and it disappears the moment the payment
+                // resolves: a settled row has nothing left to ask, and offering the action would
+                // imply its outcome might still change.
+                //
+                // It is the only route to an answer once the SDK's 30-day poll gives up, which is
+                // also why an unresolved row is shown in history at all.
+                if isOpen {
+                    Button {
+                        Task { await checkStatus() }
+                    } label: {
+                        if checkingStatus {
+                            HStack {
+                                ProgressView()
+                                Text("Checking the payment status…")
+                            }
+                        } else {
+                            Label("Check status", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    // The SDK has no throttle by design — the screen disables its own button.
+                    .disabled(checkingStatus)
+                    if let note = statusCheckNote {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             // The merchant-credited indicator — did the money actually reach the merchant's bank?
             // `isCreditConfirmationSupported` is the whole gate: false/nil means the rail does not
@@ -81,6 +115,32 @@ struct TransactionDetailView: View {
                         }
                     }
                     .padding(.vertical, 2)
+
+                    // "Check merchant credit" — the manual ask beside the SDK's own 30-day credit
+                    // sweep. Shown on exactly the predicate the SDK enforces internally: approved,
+                    // the merchant's bank on the confirmation rail, and not already RECEIVED —
+                    // which deliberately includes a row the sweep gave up on and stamped
+                    // UNABLE_TO_CONFIRM. That give-up means "we stopped asking", never "the
+                    // merchant was not paid", so it is the row this button matters most for.
+                    if canCheckCredit {
+                        Button {
+                            Task { await checkMerchantCredit() }
+                        } label: {
+                            if checkingCredit {
+                                HStack {
+                                    ProgressView()
+                                    Text("Checking whether the merchant's bank received the funds…")
+                                }
+                            } else {
+                                Label("Check merchant credit", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        // No SDK-side throttle by design — the screen disables its own button.
+                        .disabled(checkingCredit)
+                    }
+                    if let note = creditCheckNote {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             if tx.transactionHash != nil {
@@ -204,6 +264,74 @@ struct TransactionDetailView: View {
             let rows = (try? await VeyraWallet.shared.tokenisation
                 .transactionHistory(tokenUniqueReference: tokenUniqueReference, limit: 100)) ?? []
             if let fresh = rows.first(where: { $0.transactionHash == hash }) { live = fresh }
+        }
+    }
+
+    /// Is this row still awaiting an outcome? A status this build does not recognise is open too —
+    /// unknown values are carried raw, and an unresolved row must not read as settled just because
+    /// we cannot name its status.
+    private var isOpen: Bool {
+        let stated = liveRow.authorizationStatus?
+            .trimmingCharacters(in: .whitespaces).uppercased() ?? ""
+        return !["APPROVED", "DECLINED", "FAILED"].contains(stated)
+            && liveRow.transactionHash?.isEmpty == false
+    }
+
+    /// Ask now. A resolving answer re-renders the status line and hides the button; anything else is
+    /// "still processing", which is an answer rather than a failure. A failure says why — offline
+    /// above all (`NO_NETWORK_CONNECTION`) — and never changes the row.
+    private func checkStatus() async {
+        guard let hash = liveRow.transactionHash else { return }
+        checkingStatus = true
+        statusCheckNote = nil
+        defer { checkingStatus = false }
+        do {
+            let fresh = try await VeyraWallet.shared.tokenisation
+                .refreshTransactionStatus(transactionHash: hash)
+            if let fresh { live = fresh }
+            let stated = fresh?.authorizationStatus?
+                .trimmingCharacters(in: .whitespaces).uppercased() ?? ""
+            if !["APPROVED", "DECLINED", "FAILED"].contains(stated) {
+                statusCheckNote = "Still processing — the wallet will keep checking."
+            }
+        } catch VeyraWalletError.noNetworkConnection {
+            statusCheckNote = "No internet connection — connect and try again."
+        } catch {
+            statusCheckNote = "Could not check right now: \(error.localizedDescription)"
+        }
+    }
+
+    // ── The on-demand credit check ──────────────────────────────────────────────────────────
+
+    /// The one predicate: approved, the merchant's bank on the confirmation rail, and not already
+    /// confirmed. The SDK enforces the same line internally, so a press outside it would be a no-op
+    /// rather than a wasted request — but offering a control that does nothing is its own defect.
+    private var canCheckCredit: Bool {
+        liveRow.authorizationStatus == "APPROVED"
+            && liveRow.isCreditConfirmationSupported == true
+            && liveRow.creditConfirmationStatus != "RECEIVED"
+            && liveRow.transactionHash?.isEmpty == false
+    }
+
+    /// Ask now. A confirming answer re-renders the credit line and hides the button; anything else
+    /// is "not confirmed **yet**" and leaves the row alone. A failure says why — offline above all
+    /// (`NO_NETWORK_CONNECTION`) — and never changes the row.
+    private func checkMerchantCredit() async {
+        guard let hash = liveRow.transactionHash else { return }
+        checkingCredit = true
+        creditCheckNote = nil
+        defer { checkingCredit = false }
+        do {
+            let fresh = try await VeyraWallet.shared.tokenisation
+                .refreshCreditConfirmation(transactionHash: hash)
+            if let fresh { live = fresh }
+            if fresh?.creditConfirmationStatus != "RECEIVED" {
+                creditCheckNote = "Still not confirmed — the wallet will keep checking."
+            }
+        } catch VeyraWalletError.noNetworkConnection {
+            creditCheckNote = "No internet connection — connect and try again."
+        } catch {
+            creditCheckNote = "Could not check right now: \(error.localizedDescription)"
         }
     }
 

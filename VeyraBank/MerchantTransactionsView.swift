@@ -15,6 +15,10 @@ struct MerchantTransactionsView: View {
     @State private var loadError: String?
     // A receipt that should exist but fails to load surfaces an alert, never a dead tap.
     @State private var receiptError = false
+    // Which row's manual credit check is in flight, and each row's transient note (stayed
+    // unconfirmed, or failed). Neither is durable state — the SDK's stored row is.
+    @State private var checkingCredit: String?
+    @State private var creditCheckNotes: [String: String] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,19 +102,70 @@ struct MerchantTransactionsView: View {
                     Text(code).font(.caption2).foregroundStyle(.secondary)
                 }
                 // Whether the merchant's bank confirmed receiving the funds. Absent
-                // while unconfirmed — nothing is shown, never "not received". (iOS has no
-                // background poller; the field reflects what the SDK's store holds, and the
-                // app can refresh it via transactions.creditConfirmation.)
+                // while unconfirmed — nothing is shown, never "not received". The SDK's own credit
+                // sweep is app-scoped on iOS too, so this field is kept current in the background;
+                // the row merely renders it.
                 if let credit = tx.creditConfirmationStatus, !credit.isEmpty {
                     Text(credit == "RECEIVED" ? "Funds received by merchant bank" : "Bank credit could not be confirmed")
                         .font(.caption2)
                         .foregroundStyle(credit == "RECEIVED" ? Color.green : Color.secondary)
+                }
+                // "Check merchant credit" — the manual ask beside that sweep. Shown on exactly the
+                // predicate the SDK enforces internally: approved, the merchant's bank on the
+                // confirmation rail, and not already RECEIVED — which includes a row the 30-day
+                // sweep gave up on, since "we stopped asking" was never "the funds were not paid".
+                // It lives on the row because this list *is* the merchant's transaction detail on
+                // iOS. On an approved row this is the button that applies; on a pending one,
+                // "Check status" is.
+                if Self.canCheckCredit(tx) {
+                    if checkingCredit == tx.reference {
+                        HStack(spacing: 6) {
+                            ProgressView().scaleEffect(0.7)
+                            Text("Checking whether the merchant's bank received the funds…")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button("Check merchant credit") {
+                            Task { await checkMerchantCredit(tx.reference) }
+                        }
+                        .font(.caption2)
+                        // The SDK has no throttle by design — the screen disables its own button.
+                        .disabled(checkingCredit != nil)
+                    }
+                }
+                if let note = creditCheckNotes[tx.reference] {
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
                 // Cardholder Name (EMV 5F20) as the card presented it — a Veyra token shows
                 // its display name, e.g. "AFRIGO ****1234". Absent on QR-MPM (the merchant
                 // never reads the card) and on rows recorded before the SDK captured it.
                 if let cardholder = tx.cardholderName, !cardholder.isEmpty {
                     Text(cardholder).font(.caption2).foregroundStyle(.secondary)
+                }
+
+                // "Check status" — the manual ask beside the SDK's own background poll. Shown ONLY
+                // while the row is PENDING; it disappears the moment the payment resolves, because
+                // a settled row has nothing left to ask. It lives on the row because this list *is*
+                // the merchant's transaction detail on iOS. It is the documented route to an answer
+                // past the SDK's 30-day give-up.
+                if Self.canCheckStatus(tx) {
+                    if checkingStatus == tx.reference {
+                        HStack(spacing: 6) {
+                            ProgressView().scaleEffect(0.7)
+                            Text("Checking the payment status…")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button("Check status") {
+                            Task { await checkStatus(tx.reference) }
+                        }
+                        .font(.caption2)
+                        // The SDK has no throttle by design — the screen disables its own button.
+                        .disabled(checkingStatus != nil)
+                    }
+                }
+                if let note = statusCheckNotes[tx.reference] {
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
             }
             // An explicit receipt CTA — an invisible whole-row tap reads as
@@ -136,6 +191,68 @@ struct MerchantTransactionsView: View {
             loadError = "Couldn't load transactions"
         }
         loading = false
+    }
+
+    /// Only a still-`PENDING` sale has an outcome left to ask about. A settled row is deliberately
+    /// excluded — offering the action would imply the outcome could still change.
+    private static func canCheckStatus(_ tx: MerchantTransaction) -> Bool {
+        tx.status == "PENDING"
+    }
+
+    /// Ask now. A resolving answer is written to the SDK's store and re-read here so the row
+    /// re-renders and the button disappears; anything else is "still processing", which is an
+    /// answer rather than a failure. A failure says why — offline above all — and never changes the
+    /// row.
+    private func checkStatus(_ reference: String) async {
+        checkingStatus = reference
+        statusCheckNotes[reference] = nil
+        defer { checkingStatus = nil }
+        do {
+            let fresh = try await VeyraSoftPOS.shared.transactions
+                .refreshStatus(reference: reference)
+            if let fresh, let i = transactions.firstIndex(where: { $0.reference == reference }) {
+                transactions[i] = fresh
+            }
+            if fresh?.status == "PENDING" {
+                statusCheckNotes[reference] = "Still processing — the SDK will keep checking."
+            }
+        } catch VeyraSoftPOSError.noNetworkConnection {
+            statusCheckNotes[reference] = "No internet connection — connect and try again."
+        } catch {
+            statusCheckNotes[reference] = "Could not check right now: \(error.localizedDescription)"
+        }
+    }
+
+    /// The one predicate, shared with the button's visibility and with the SDK's own internal gate —
+    /// approved, the merchant's bank on the confirmation rail, not already confirmed. A row outside
+    /// it has nothing to ask, so offering the action would be a dead control.
+    private static func canCheckCredit(_ tx: MerchantTransaction) -> Bool {
+        tx.status == "APPROVED"
+            && tx.isCreditConfirmationSupported == true
+            && tx.creditConfirmationStatus != "RECEIVED"
+    }
+
+    /// Ask now. A confirming answer is written to the SDK's store and re-read here so the row
+    /// re-renders and the button disappears; anything else is "not confirmed **yet**" and leaves the
+    /// row alone. A failure says why — offline above all — and never changes the row.
+    private func checkMerchantCredit(_ reference: String) async {
+        checkingCredit = reference
+        creditCheckNotes[reference] = nil
+        defer { checkingCredit = nil }
+        do {
+            let fresh = try await VeyraSoftPOS.shared.transactions
+                .refreshCreditConfirmation(reference: reference)
+            if let fresh, let i = transactions.firstIndex(where: { $0.reference == reference }) {
+                transactions[i] = fresh
+            }
+            if fresh?.creditConfirmationStatus != "RECEIVED" {
+                creditCheckNotes[reference] = "Still not confirmed — the SDK will keep checking."
+            }
+        } catch VeyraSoftPOSError.noNetworkConnection {
+            creditCheckNotes[reference] = "No internet connection — connect and try again."
+        } catch {
+            creditCheckNotes[reference] = "Could not check right now: \(error.localizedDescription)"
+        }
     }
 
     private func loadReceipt(_ reference: String) async {

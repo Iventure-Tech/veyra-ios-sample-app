@@ -403,7 +403,10 @@ struct GetPaidView: View {
                         // scannable), rather than waiting for the next server poll.
                         qrState = .failed("This payment code has expired — please start a new payment")
                         scheduleAutoReturn()
-                    }
+                    },
+                    // Your own order id — optional, never a lookup key, and safe to repeat across
+                    // attempts of one sale. The transaction reference is the SDK's to mint.
+                    merchantOrderID: SampleData.nextOrderID()
                 )
                 guard let image = Self.makeQR(payload: context.mpmPayload) else {
                     qrState = .failed("Could not render the payment code — please try again")
@@ -666,8 +669,13 @@ struct GetPaidView: View {
         creditConfirmState = nil
         Task { @MainActor in
             do {
-                let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(scanned)
-                // A delivered outcome (approved or declined) is recorded under this reference.
+                let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(
+                    scanned,
+                    // Optional, yours, never a key — see createContext above.
+                    merchantOrderID: SampleData.nextOrderID()
+                )
+                // A delivered outcome (approved or declined) is recorded under the reference the
+                // SDK minted and the gateway echoed — never one the app made up.
                 lastPaymentReference = outcome.reference
                 page = .customerQrResult(
                     approved: outcome.approved,

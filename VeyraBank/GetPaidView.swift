@@ -468,7 +468,9 @@ struct GetPaidView: View {
                     .multilineTextAlignment(.center)
             case .dialogue:
                 ProgressView().tint(.white).scaleEffect(1.6)
-                Text("Reading — hold steady…")
+                // The sub-phase events narrate this window — card read, request sent, response
+                // received — so the merchant sees progress instead of one static line.
+                Text(tapHint ?? "Reading — hold steady…")
                     .font(.footnote).foregroundStyle(.gray)
             case .result(let result):
                 // Map the kernel outcome to a merchant-facing result — never surface
@@ -482,6 +484,21 @@ struct GetPaidView: View {
                 Text(outcome.message)
                     .font(.footnote).foregroundStyle(.gray)
                     .multilineTextAlignment(.center).padding(.horizontal)
+                // The tap rail reaches the same beneficiary credit-confirmation wait the QR rails
+                // show — an approved tap result carries the credit facts.
+                switch creditConfirmState {
+                case .waiting:
+                    Text("Confirming credit with merchant bank…")
+                        .font(.footnote).foregroundStyle(.orange)
+                case .received:
+                    Text("Funds received by merchant bank")
+                        .font(.footnote).foregroundStyle(.green)
+                case .unable:
+                    Text("Bank credit could not be confirmed")
+                        .font(.footnote).foregroundStyle(.red)
+                case nil:
+                    EmptyView()
+                }
                 viewReceiptButton
             case .failed(let message):
                 Image(systemName: "exclamationmark.triangle")
@@ -506,6 +523,9 @@ struct GetPaidView: View {
         .onDisappear {
             tapSession?.cancel()
             tapSession = nil
+            // Render-only watch: stopping it stops the screen re-reading the store, never the
+            // SDK's own credit polling, which is app-scoped.
+            stopCreditConfirmationWatch()
         }
     }
 
@@ -523,6 +543,8 @@ struct GetPaidView: View {
         tapState = .waiting
         tapHint = nil
         lastPaymentReference = nil
+        stopCreditConfirmationWatch()
+        creditConfirmState = nil
         let session = VeyraSoftPOS.shared.tap.session(amountMinorUnits: amountMinorUnits ?? 0) { event in
             switch event {
             case .cardDetected:
@@ -530,6 +552,18 @@ struct GetPaidView: View {
             case .unsupportedTarget:
                 tapState = .waiting
                 tapHint = "Card not supported — ask for their Veyra wallet and try again"
+            // The four tap sub-phases. The first is the customer's phone leaving the field
+            // mid-read — a "hold steady" hint, not an outcome; the other three narrate the
+            // online window.
+            case .cardContactLost:
+                tapHint = "Contact lost — hold the phones together"
+            case .cardReadingComplete:
+                tapState = .dialogue
+                tapHint = "Card read — you can take the phone away"
+            case .sendingRequestOnline:
+                tapHint = "Contacting the bank…"
+            case .receivingOnlineResponse:
+                tapHint = "Bank responded — finishing up…"
             case .ended(let outcome):
                 if outcome != .cancelled {
                     tapState = .failed("Reader ended (\(outcome.rawValue)) — please try again")
@@ -538,7 +572,17 @@ struct GetPaidView: View {
             case .result(let result):
                 lastPaymentReference = result.reference
                 tapState = .result(result)
+                tapHint = nil
+                // An approved tap carries the credit facts, so it enters the same "confirming
+                // credit" wait as the QR rails. The watch renders the stored row and owns only
+                // this result's hold — the polling is the SDK's, app-scoped.
                 scheduleAutoReturn()
+                if result.status == "APPROVED", let reference = result.reference {
+                    watchCreditConfirmation(
+                        reference: reference,
+                        initialWaiting: result.isCreditConfirmationSupported == true
+                    )
+                }
             }
         }
         tapSession = session
@@ -665,6 +709,15 @@ struct GetPaidView: View {
         stopCreditConfirmationWatch()
         creditConfirmState = initialWaiting ? .waiting : nil
         if initialWaiting { cancelAutoReturn() }
+        // The SDK *pushes* the answer, so take it the instant it lands rather than up to a poll
+        // interval later. This is a notification, not the truth: the store re-read below stays,
+        // and is what covers a screen opened after the fact. Registration is single-listener —
+        // the next sale's watch replaces this one.
+        try? VeyraSoftPOS.shared.transactions.onCreditConfirmation { confirmation in
+            guard confirmation.reference == reference else { return }
+            creditConfirmState = confirmation.status == "RECEIVED" ? .received : .unable
+            scheduleAutoReturn()
+        }
         creditWatchTask = Task { @MainActor in
             while !Task.isCancelled {
                 let row = try? await VeyraSoftPOS.shared.transactions.history(limit: 50)
@@ -690,6 +743,8 @@ struct GetPaidView: View {
     private func stopCreditConfirmationWatch() {
         creditWatchTask?.cancel()
         creditWatchTask = nil
+        // Only this screen's observer goes; the SDK's app-scoped polling is untouched.
+        try? VeyraSoftPOS.shared.transactions.stopObservingCreditConfirmation()
     }
 
     private func customerQrResult(_ approved: Bool, _ detail: String?) -> some View {

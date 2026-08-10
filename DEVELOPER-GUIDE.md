@@ -123,7 +123,7 @@ let merchant = VeyraSoftPOS.shared.merchant
 | `merchant` | Merchant lifecycle — registration, status, activate/deactivate, profile update, banks, stored merchant. |
 | `tap` | Contactless tap acceptance — the customer's Android Veyra wallet taps this iPhone. |
 | `payments` | QR payments — create/poll a get-paid QR (merchant-presented) and inspect/charge a customer QR (consumer-presented). |
-| `transactions` | Transaction queries — local history, receipts, status polling. |
+| `transactions` | Transaction queries — local history, receipts, status polling — and the two deferred-answer observers (`onTransactionResolved`, `onCreditConfirmation`). |
 
 ### `VeyraWallet` (wallet features)
 
@@ -324,6 +324,16 @@ let session = VeyraSoftPOS.shared.tap.session(amountMinorUnits: 32500) { event i
     case .unsupportedTarget:
         // stays armed — transient hint, keep waiting screen up
         hint = "Card not supported — ask for their Veyra wallet and try again"
+    case .cardContactLost:
+        // the customer moved their phone mid-read — "hold steady", keep waiting
+        hint = "Contact lost — hold the phones together"
+    case .cardReadingComplete:
+        // the card conversation is over; nothing talks to it after this
+        hint = "Card read — you can take the phone away"
+    case .sendingRequestOnline:
+        hint = "Contacting the bank…"
+    case .receivingOnlineResponse:
+        hint = "Bank responded — finishing up…"
     case .ended(let outcome):
         // reader session ended without a card — typed, so the switch is compiler-checked:
         // .cancelled (merchant dismissed the sheet — not an error), .timeout ("no card
@@ -344,7 +354,9 @@ do {
 session.cancel()
 ```
 
-`session(amountMinorUnits:currencyCode:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`). Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult`: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"`), `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`.
+`session(amountMinorUnits:currencyCode:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`). Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult`: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"`), `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`, plus `creditTransactionID` + `isCreditConfirmationSupported` on an approved sale — the cue to show the "confirming credit" wait and flip it from `transactions.onCreditConfirmation`.
+
+**The four progress events are hints, not outcomes.** `cardContactLost` says the customer's phone left the field while the card was being read; the interrupted attempt still reports its own `result`, and the reader stays armed for a fresh tap. `cardReadingComplete`, `sendingRequestOnline` and `receivingOnlineResponse` mark the online window — nothing talks to the card after `cardReadingComplete`, so that is the moment to tell the merchant the tap is over. Use them for copy only; never treat one as the end of the payment.
 
 ---
 
@@ -881,6 +893,8 @@ Two kinds of surface, marked throughout:
 | | `.authenticationFailed(message)` | Face ID / Touch ID / passcode failed or was cancelled — **no payment was attempted**, nothing recorded | Stay on the confirm screen; let the user retry. |
 | | `.onlineRequired(message)` | The card has no usable payment keys — refused **before** any payment/QR is built | Prompt the user to connect to the internet. Pre-empt it: the card already shows `requiresOnline == true` — grey it out. Clears itself after the SDK's automatic refresh. |
 | | `.amountExceedsCardLimit(message)` | The amount is larger than this card can carry in one payment — refused **before** any payment/QR is built | Offer a smaller amount or another card. Unlike `.onlineRequired` this does **not** clear by going online: the per-payment limit is provisioned with the card. |
+
+Both refusals are also available as an observer — `VeyraWallet.shared.tokenisation.observePaymentRefusals(onRequireOnline:onAmountExceedsCardLimit:)`, with `stopObservingPaymentRefusals()` — for hosts that would rather handle them in one place than at every call site. **Porting from Android? The registration shape differs.** On Android the two refusals are **per token**: you hand them to the card you are arming, so different cards can carry different handlers simultaneously. On iOS it is a **single SDK-wide registration** — observing again replaces the previous observer — and the callback's `tokenUniqueReference` tells you which card it was about. Nothing is lost, but Android code that assumes "this handler only ever hears about *this* card" must start filtering on `tokenUniqueReference` here. It is the same last-registration-wins rule the `transactions` observers follow.
 | | `.tokenNotActive(message)` | The card's server-side status is not active (e.g. suspended by the issuer) — **no payment was attempted** | Tell the user the card is suspended/inactive. Don't retry locally — payments resume automatically once a status sync sees the card active again. |
 | | `.requestFailed(message)` | Everything else (network, backend, invalid input) | Show `error.localizedDescription` — every case carries its underlying message. |
 | `VeyraSoftPOSError` | `.notConfigured` | Any call before `VeyraSoftPOS.configure(_:)` | Configure at launch. |
@@ -1086,14 +1100,16 @@ public struct MerchantRegistrationResult { let success: Bool; let merchantID: St
 public struct MerchantStatus { let merchantID: String; let status: String? }
 public struct MerchantUpdate { /* see merchant.update */ }
 public struct StoredMerchant { /* full stored profile incl. backend-assigned merchantCategoryCode, terminalID, merchantStatus */ }
-public enum TapPaymentEvent { case cardDetected, unsupportedTarget, ended(outcome: String), result(TapPaymentResult) }
-public struct TapPaymentResult { let status: String; let pan: String?; let cardholderName: String?; let errorMessage: String?; let reference: String? }
+public enum TapPaymentEvent { case cardDetected, unsupportedTarget, cardContactLost, cardReadingComplete, sendingRequestOnline, receivingOnlineResponse, ended(outcome: TapSessionOutcome), result(TapPaymentResult) }
+public struct TapPaymentResult { let status: String; let pan: String?; let cardholderName: String?; let errorMessage: String?; let reference: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }
 public struct PaymentContextQR { let txRef: String; let expiry: String?; let kid: String?; let mpmPayload: String }
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }
 public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String; let cardholderName: String? }
 public struct CustomerQrChargeOutcome { let approved: Bool; let responseCode: String?; let transactionID: String?; let reference: String; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }
 public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let responseStatusReason: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?; let creditConfirmationStatus: String? }
-public struct CreditConfirmation { let creditTransactionID: String; let status: String; let amountMinorUnits: Int64?; let creditedAt: String?; let bankReference: String?; let message: String? }
+public struct CreditConfirmation { let creditTransactionID: String; let status: String; let amountMinorUnits: Int64?; let creditedAt: String?; let bankReference: String?; let message: String? }   // the on-demand fetch's reply
+public struct TransactionResolution { let reference: String; let responseCode: String?; let status: String; let reason: String? }   // transactions.onTransactionResolved payload
+public struct SaleCreditConfirmation { let reference: String; let creditTransactionID: String?; let status: String; let amountMinorUnits: Int64?; let bankReference: String?; let creditedAt: String? }   // transactions.onCreditConfirmation payload
 public struct MerchantReceipt { let merchantName: String; let merchantAddress: String; let transactionType: String; let totalAmountMinorUnits: Int64; let totalAmountFormatted: String; let maskedToken: String; let reference: String; let transactionHash: String?; let qrPayload: String }
 public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64; let responseCode: String; let merchantStatus: String?; let transactionID: String? }
 ```
@@ -1157,8 +1173,10 @@ Merchant registered & ACTIVE? ──no──► register / activate first
         │
         ├─────────────── Tap ───────────────► tap.session
         │                                       ├─ .cardDetected: "hold steady"
-        │                                       ├─ .unsupportedTarget / contact lost:
+        │                                       ├─ .unsupportedTarget / .cardContactLost:
         │                                       │    transient hint, stays armed
+        │                                       ├─ .cardReadingComplete → .sendingRequestOnline
+        │                                       │    → .receivingOnlineResponse: progress
         │                                       └─ terminal outcome → result screen
         │
         ├─────────── Show a QR ─────────────► payments.createContext
@@ -1225,30 +1243,62 @@ reconciliation has stopped and a human will settle the payment. Stop any tight l
 the merchant "we're looking into this", and re-check lazily — next app open, or a long backoff. It will
 still resolve; it just will not resolve in seconds.
 
-#### `onTransactionResolved` — the SDK pushes the answer
+#### `transactions.onTransactionResolved` — the SDK pushes the answer
 
 ```swift
-// The observer is part of the shared KMP surface, exported as a singleton.
-TransactionResolvedObserver.shared.onTransactionResolved { resolution in
-    // resolution.reference   — which payment (you may have more than one pending)
-    // resolution.status      — APPROVED / DECLINED / FAILED (never PENDING)
-    // resolution.reason      — e.g. INSUFFICIENT_FUNDS
+try VeyraSoftPOS.shared.transactions.onTransactionResolved { resolution in
+    // resolution.reference    — which payment (you may have more than one pending)
+    // resolution.status       — "APPROVED" / "DECLINED" / "FAILED" (never "PENDING")
+    // resolution.reason       — e.g. "INSUFFICIENT_FUNDS"
     // resolution.responseCode — the wire literal, for receipts and support
 }
+
+// …and when you no longer want it:
+try VeyraSoftPOS.shared.transactions.stopObservingTransactionResolved()
 ```
 
-Four things worth knowing before you rely on it:
+Five things worth knowing before you rely on it:
 
 - **Register once, at start-up** — not per payment. It fires for *any* transaction that resolves,
   including one started in an earlier app session and settled by a later poll. That is the case that
   matters most: a tap that resolves after your app was backgrounded or killed.
+- **Registration is single-listener: last registration wins.** Calling it again *replaces* the previous
+  observer rather than adding a second one, and `stopObservingTransactionResolved()` clears it. There
+  is no subscription token and no listener list — if two parts of your app both want the answer, fan it
+  out yourself from one registration.
 - **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
-  read `getLastTransactions()` at start-up. The observer is a convenience over the store, not a delivery
-  guarantee, so keep the read path.
+  read `transactions.history(limit:)` at start-up. The observer is a convenience over the store, not a
+  delivery guarantee, so keep the read path.
 - **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
   this separate channel; the two are not alternatives.
 - It is delivered on the main queue, like the payment callback.
-- iOS has no tap rail, so on iOS this fires from the QR rails (MPM settle, CPM charge).
+
+It fires from every rail this platform has — the tap reader, the merchant-presented QR settle and the
+customer-QR charge — because the SDK announces it from the one place a stored row stops being pending.
+
+#### `transactions.onCreditConfirmation` — the funds landed
+
+The settlement half of the same idea: after an approved sale whose response said
+`isCreditConfirmationSupported`, the SDK asks the merchant's bank (exponential backoff, up to 30 days)
+and pushes the answer here.
+
+```swift
+try VeyraSoftPOS.shared.transactions.onCreditConfirmation { confirmation in
+    // confirmation.reference        — which sale
+    // confirmation.status           — "RECEIVED", or the final 30-day "UNABLE_TO_CONFIRM"
+    // confirmation.amountMinorUnits — as the merchant's bank reported it (RECEIVED only)
+    // confirmation.bankReference / .creditedAt / .creditTransactionID
+}
+
+try VeyraSoftPOS.shared.transactions.stopObservingCreditConfirmation()
+```
+
+Same rules as above — main queue, register once, **last registration wins**, no replay — plus one that
+is specific to it: **`UNABLE_TO_CONFIRM` is a give-up, never a reversal.** The payment outcome is
+unchanged; only the *settlement* could not be confirmed. And the answer is written to the sale's stored
+row (`creditConfirmationStatus`) as well as announced, so a screen opened later still shows it — which
+is why the store re-read in `transactions.creditConfirmation`'s recommended pattern stays even when you
+take the callback.
 
 #### When the SDK could not start a payment at all
 

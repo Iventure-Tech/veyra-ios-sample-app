@@ -8,6 +8,15 @@ import VeyraWallet
 
 struct TransactionDetailView: View {
     let tx: TransactionSummary
+    /// Lets this screen re-read its own row while it is up, so a credit confirmation that lands
+    /// during the visit appears without navigating away and back.
+    let tokenUniqueReference: String
+
+    /// The freshest copy of this row, re-read from the SDK's store; falls back to what we were
+    /// handed. A **store read**, never a poll — the SDK owns the credit polling and keeps asking
+    /// whether or not this screen exists.
+    @State private var live: TransactionSummary?
+    private var liveRow: TransactionSummary { live ?? tx }
 
     @State private var linkedReceipt: TransactionReceipt?
     @State private var showingReceipt = false
@@ -57,6 +66,23 @@ struct TransactionDetailView: View {
                     row("Currency") { Text(currency).font(.subheadline.monospaced()) }
                 }
             }
+            // The merchant-credited indicator — did the money actually reach the merchant's bank?
+            // `isCreditConfirmationSupported` is the whole gate: false/nil means the rail does not
+            // exist for this payment, so the section is absent entirely. Absence means "we cannot
+            // ask", never "the merchant was not paid".
+            if liveRow.isCreditConfirmationSupported == true {
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(creditText)
+                            .font(.subheadline)
+                            .foregroundStyle(creditColor)
+                        if let detail = creditDetail {
+                            Text(detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
             if tx.transactionHash != nil {
                 Section {
                     if linkedReceipt != nil {
@@ -84,6 +110,7 @@ struct TransactionDetailView: View {
         .navigationTitle("Transaction")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadLinkedReceipt() }
+        .task { await watchCreditConfirmation() }
         .sheet(isPresented: $showingReceipt) {
             if let linkedReceipt {
                 WalletReceiptDetailView(receipt: linkedReceipt)
@@ -163,7 +190,52 @@ struct TransactionDetailView: View {
         }
     }
 
+    /// Re-read this row from the SDK's store while the screen is up, so a credit confirmation
+    /// that lands during the visit appears immediately.
+    ///
+    /// A store read, not a poll — the SDK's own credit sweep is app-scoped and runs for up to 30
+    /// days regardless of this view. SwiftUI cancels this `.task` when the view goes away, which
+    /// ends the refresh and nothing else. Stops once the answer is terminal.
+    private func watchCreditConfirmation() async {
+        guard let hash = tx.transactionHash, liveRow.isCreditConfirmationSupported == true else { return }
+        while !Task.isCancelled && liveRow.creditConfirmationStatus == nil {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if Task.isCancelled { return }
+            let rows = (try? await VeyraWallet.shared.tokenisation
+                .transactionHistory(tokenUniqueReference: tokenUniqueReference, limit: 100)) ?? []
+            if let fresh = rows.first(where: { $0.transactionHash == hash }) { live = fresh }
+        }
+    }
+
     // ── Display helpers ─────────────────────────────────────────────────────────────────────
+
+    /// The merchant-credited line. Only ever rendered with the supported flag true, so `nil` here
+    /// means "no answer yet" — the in-flight state — and never "not received". The 30-day give-up
+    /// says "could not confirm" for exactly the same reason.
+    private var creditText: String {
+        switch liveRow.creditConfirmationStatus {
+        case "RECEIVED": return "Merchant's bank has received the funds"
+        case "UNABLE_TO_CONFIRM": return "Could not confirm the merchant's bank received the funds"
+        default: return "Confirming the merchant's bank has received the funds…"
+        }
+    }
+
+    private var creditColor: Color {
+        switch liveRow.creditConfirmationStatus {
+        case "RECEIVED": return .green
+        case "UNABLE_TO_CONFIRM": return .secondary
+        default: return .orange
+        }
+    }
+
+    /// The bank's own description of the credit — present on `RECEIVED` only.
+    private var creditDetail: String? {
+        let parts = [
+            liveRow.creditedAt,
+            liveRow.bankReference.map { "Bank reference: \($0)" },
+        ].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     /// Display strings for the wallet-perspective entry method.
     private var entryMethodText: String? {

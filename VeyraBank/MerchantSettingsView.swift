@@ -109,7 +109,17 @@ struct MerchantSettingsView: View {
     }
 
     private func loadBanks() async {
-        banks = (try? await VeyraSoftPOS.shared.merchant.banks()) ?? []
+        do {
+            banks = try await VeyraSoftPOS.shared.merchant.banks()
+        } catch VeyraSoftPOSError.noNetworkConnection {
+            // An empty bank picker on an offline device used to be silent and indistinguishable
+            // from "this backend has no banks". Say which it is — reconnecting is the only thing
+            // that fixes it, and the merchant cannot guess that.
+            banks = []
+            errorText = "No internet connection — reconnect to load settlement banks."
+        } catch {
+            banks = []
+        }
     }
 
     /// Bank dropdown once the list is loaded; the institution code as a static row meanwhile.

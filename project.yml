@@ -7,9 +7,8 @@ options:
   deploymentTarget:
     iOS: "15.0"   # SDK floor
 packages:
-  VeyraSDK:
-    url: https://github.com/Iventure-Tech/veyra-sdk-ios
-    exactVersion: 1.0.11
+  VeyraSDK: # VEYRA-LOCAL-LINK
+    path: ../veyra-sdk/swift
 targets:
   VeyraBank:
     type: application

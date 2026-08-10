@@ -457,6 +457,14 @@ label.
 
 `PENDING` means the outcome is not yet known (the SDK keeps polling and updates the stored row); `FAILED` means the payment never reached the server. Hide receipt affordances while a row is `PENDING`.
 
+**How the SDK waits for a `PENDING` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own, with **exponential backoff**: the first re-checks come within seconds (most payments settle at once) and the interval doubles to a steady state of roughly **once an hour**. It keeps that up for **30 days** from the transaction date, and then stops asking.
+
+**Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is. ``transactions.reconcilePendingTransactions()`` still works past the window if you need one more check.
+
+A failed poll — device offline, gateway unreachable, an unreadable answer — changes nothing at all: the SDK backs off and asks again, and the row is left exactly as it was. "We could not reach the server" is never recorded as "the payment failed".
+
+**Platform note — the sweep is app-scoped.** It starts when the SDK is configured and runs for as long as the app process is alive, across every in-app navigation and whatever screen is up; no screen starts or stops it. iOS suspends timers when the OS suspends the app, so there is **no OS background execution** — the sweep pauses with the app and resumes on foreground. That costs time, never an answer: every result is written to the store, so a row resolved while you were elsewhere is simply there when you look.
+
 #### `transactions.receipt(forReference:)`
 
 Build the receipt for one transaction, including a **receipt QR the customer's Veyra wallet can scan** to store its own copy.
@@ -836,11 +844,36 @@ let history = try await VeyraWallet.shared.tokenisation
     .transactionHistory(tokenUniqueReference: ref, limit: 100)
 ```
 
-`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`.
+`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, plus the five beneficiary-credit fields below.
+
+##### Merchant credit confirmation (wallet side)
+
+Did the money actually reach the merchant's bank? The wallet asks the same question the merchant's own SDK asks about that sale, from the payer's side — **settlement confirmation only**, it never changes or restates the payment outcome.
+
+**The SDK does the polling; your view renders the stored row.** Once a payment is approved, an app-scoped sweep started at `configure(_:)` asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`transactionHistory(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
+
+| Field | What it means for you |
+|---|---|
+| `isCreditConfirmationSupported: Bool?` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line. `false`/`nil` ⇒ there is nothing to ask — render **no** credit UI for that transaction. |
+| `creditConfirmationStatus: String?` | `nil` = no answer yet (with the gate `true`, that is the "confirming…" state) · `"RECEIVED"` = terminal, the funds are confirmed in the merchant's account · `"UNABLE_TO_CONFIRM"` = the 30-day sweep stopped asking. |
+| `creditTransactionID: String?` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — display/support only; never pass it back to the SDK. |
+| `creditedAt: String?` | When the beneficiary bank posted the credit. `"RECEIVED"` only. |
+| `bankReference: String?` | The beneficiary bank's own reference for the credit. `"RECEIVED"` only. |
+
+Two things to get right, because they are easy to get wrong in the user's favour and wrong in fact:
+
+- **`"UNABLE_TO_CONFIRM"` does not mean the merchant was not paid.** It means we stopped asking after 30 days. Word it as "could not confirm", never as "not received".
+- **No credit line at all is a normal state**, not an error: it means this transaction is not on the rail (an older row recorded before your app updated, a bank that does not support confirmation, or a payment that was not approved). Absence means "we cannot ask".
+
+The same three core fields, with the same meanings, exist on the SoftPOS side of the SDK — so an app that implements both halves reads one contract.
+
+**The iOS boundary, stated rather than implied:** the sweep is app-scoped, not OS-background. It keeps polling across in-app navigation and resumes when the app returns to the foreground; while the app is suspended it does not run. That costs time, never an answer — the worklist and every result live in the SDK's store.
 
 #### `reconcilePendingTransactions`
 
-Reconcile still-`PENDING` rows against the backend. Call it opportunistically: on returning to the foreground, on pull-to-refresh, and on a short loop while a shown QR is on screen (that rail is offline — reconciliation is how its outcome arrives).
+Reconcile still-`PENDING` rows against the backend **right now**. The SDK's own app-scoped sweep (above) already resolves them without you, so this is the explicit "check again" rather than the mechanism: call it on pull-to-refresh, on returning to the foreground, or on a short loop while a shown QR is on screen for a snappier update than the backoff would give.
+
+Unlike the scheduled sweep it ignores both the backoff and the 30-day window — an explicit ask always reaches the backend, and it is the supported way to check a row the sweep has stopped polling. Failures are still swallowed: a row whose query fails is left exactly as it was.
 
 ```swift
 try await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
@@ -904,9 +937,11 @@ Two kinds of surface, marked throughout:
 
 Both refusals are also available as an observer — `VeyraWallet.shared.tokenisation.observePaymentRefusals(onRequireOnline:onAmountExceedsCardLimit:)`, with `stopObservingPaymentRefusals()` — for hosts that would rather handle them in one place than at every call site. **Porting from Android? The registration shape differs.** On Android the two refusals are **per token**: you hand them to the card you are arming, so different cards can carry different handlers simultaneously. On iOS it is a **single SDK-wide registration** — observing again replaces the previous observer — and the callback's `tokenUniqueReference` tells you which card it was about. Nothing is lost, but Android code that assumes "this handler only ever hears about *this* card" must start filtering on `tokenUniqueReference` here. It is the same last-registration-wins rule the `transactions` observers follow.
 | | `.tokenNotActive(message)` | The card's server-side status is not active (e.g. suspended by the issuer) — **no payment was attempted** | Tell the user the card is suspended/inactive. Don't retry locally — payments resume automatically once a status sync sees the card active again. |
+| | `.noNetworkConnection(message)` | **Any** wallet backend call — get banks, verify account, digitise, request activation code, activate, check token active, get token status — on a device with no working internet connection | Ask the user to connect and try again. Nothing was sent, so nothing needs undoing. |
 | | `.requestFailed(message)` | Everything else (network, backend, invalid input) | Show `error.localizedDescription` — every case carries its underlying message. |
 | `VeyraSoftPOSError` | `.notConfigured` | Any call before `VeyraSoftPOS.configure(_:)` | Configure at launch. |
 | | `.tapRefused(message)` | Arming the tap reader was refused — the wallet's payment is mid-flight (combined apps) | "Finish or cancel the current payment first." Never occurs in a SoftPOS-only app. |
+| | `.noNetworkConnection(message)` | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — on a device with no working internet connection | Ask the merchant to connect and try again. Nothing reached the gateway; no transaction was recorded. |
 | | `.requestFailed(message)` | Backend/network failure | Show the message; offer retry. |
 | `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(softpos:wallet:)` | Configure at launch. |
 
@@ -1029,6 +1064,24 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | `.unrecognisedResponseCode` | Add card | Yes | Digitisation answered with a code this SDK version does not know, so the token was discarded and no card was added. Retry; if it persists, update the Veyra SDK. |
 | Activation `"FAILURE"` | Activation | Per `message` | Branch on the [known messages](#activation--status--failure-messages): resend on expiry, cool-down on the rate cap, stop entirely on lockout ("contact your issuer"). |
 | `.tapRefused` | Combined apps | Yes (after mode settles) | The other mode's payment is mid-flight — prompt to finish/cancel it. |
+| `.noNetworkConnection` (both enums; `TapPaymentResult.sdkErrorCode == "NO_NETWORK_CONNECTION"`) | Any backend call, both products | Yes, once connected | The device has no working internet connection and the call never left it. Ask the user to connect and retry. |
+
+**Three things end with "get online", and they are not the same thing.** Confusing them produces
+either a card you have wrongly greyed out or a promise of a refresh that cannot happen:
+
+- **`.noNetworkConnection`** — the *device* has no connection. Every call fails the same way and
+  nothing recovers until the user reconnects. Retrying is safe: nothing was sent.
+- **`.onlineRequired`** — the *card* has run out of payment keys. The device is usually online
+  already; the SDK refreshes the card itself, typically within seconds. It is a card state, not a
+  network state, so greying a card out on `.noNetworkConnection` is wrong — the card is fine.
+- **`91` / `ISSUER_SWITCH_NOT_AVAILABLE`** — the device reached the network and the gateway refused
+  the connection. The payment provably never went through, so it is safe to retry — but the user's
+  connection is not the problem and telling them to check it wastes their time.
+
+An offline tap is reported as `.noNetworkConnection` on the error surface and as
+`sdkErrorCode == "NO_NETWORK_CONNECTION"` on `TapPaymentResult` — with **no** response code, because
+nothing reached the gateway. Do not show it as a decline, and do not poll it: there is no transaction
+to reconcile.
 
 ---
 
@@ -1101,6 +1154,12 @@ public struct TransactionSummary {          // wallet history row
     let entryMethod: String?                // "TAP" / "QR_GENERATED" / "QR_SCANNED" / nil
     let merchantLocation: String?; let transactionHash: String?
     let atEpochMillis: Int64?; let merchantTransactionReference: String?; let merchantId: String?
+    // Beneficiary credit confirmation — settlement only, never the payment outcome.
+    let creditTransactionID: String?           // credit-leg id; display/support only
+    let isCreditConfirmationSupported: Bool?   // THE GATE: true ⇒ SDK is polling, render the line
+    let creditConfirmationStatus: String?      // nil = no answer yet / "RECEIVED" / "UNABLE_TO_CONFIRM"
+    let creditedAt: String?                    // when the bank posted the credit (RECEIVED only)
+    let bankReference: String?                 // the bank's own reference   (RECEIVED only)
 }
 public struct TransactionReceipt {
     /* merchantName, merchantId, merchantAddress, transactionType, transactionStatus,

@@ -20,7 +20,12 @@ struct TransactionsView: View {
             }
             ForEach(Array(history.enumerated()), id: \.offset) { _, tx in
                 // Each row opens the transaction detail screen (view/scan receipt).
-                NavigationLink(destination: TransactionDetailView(tx: tx)) {
+                NavigationLink(destination: TransactionDetailView(
+                    tx: tx,
+                    // The detail screen re-reads its own row from the SDK store while it is up
+                    // (the credit confirmation can land mid-visit), which needs the TUR.
+                    tokenUniqueReference: tokenUniqueReference
+                )) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(tx.merchantName).font(.subheadline.weight(.medium))

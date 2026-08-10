@@ -780,11 +780,19 @@ do {
 
 #### `payScannedContext`
 
-Pay the verified context with the wallet's **active card**. Requires the fresh authentication above (the SDK enforces one per payment). The delivered outcome — approved or declined — also lands in the card's history.
+Pay the verified context with the wallet's **active card**. Requires the fresh authentication above (the SDK enforces one per payment). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
+
+**Branch on `responseStatus`, not on `approved` or the response code.** The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one.
 
 ```swift
 let outcome = try await VeyraWallet.shared.tokenisation.payScannedContext(payment)
-showResult(outcome.approved, outcome.responseCode)
+switch outcome.responseStatus?.uppercased() {
+case "APPROVED": showApproved(outcome.message)
+case "DECLINED", "FAILED": showDeclined(outcome.message, outcome.responseStatusReason)
+// Absent or anything else: not yet known. Say so, and point at history —
+// never show a refusal for a payment that may still settle.
+default: showPending(outcome.responseCode)
+}
 // catch VeyraWalletError.onlineRequired — prompt to connect, stay on confirm screen
 ```
 
@@ -1067,7 +1075,11 @@ public struct VerifiedPayment {
     let amountMinorUnits: Int64; let currencyNumeric: String; let expiryEpochSeconds: Int64
 }
 public struct PaymentOutcome {
-    let approved: Bool; let responseCode: String?; let message: String?
+    let approved: Bool                       // derived: responseStatus == "APPROVED"; false for PENDING too
+    let responseCode: String?                // "00", "51", "68"… — always populated, quote it verbatim
+    let responseStatus: String?              // APPROVED · DECLINED · FAILED · PENDING — what the payment IS
+    let responseStatusReason: String?        // stated cause: INSUFFICIENT_FUNDS, NO_RESPONSE_RECEIVED…
+    let message: String?
     let merchantName: String?                // registered name from the gateway (beats the QR copy)
     let merchantLocation: String?            // "city, state" from the gateway; nil if not supplied
 }

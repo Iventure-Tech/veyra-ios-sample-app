@@ -11,7 +11,23 @@ struct ScanToPayView: View {
         case scanning
         case confirming(VerifiedPayment)
         case paying(VerifiedPayment)
-        case result(success: Bool, headline: String, detail: String?)
+        case result(state: ResultState, headline: String, detail: String?)
+    }
+
+    /// How the result page reads a push outcome. Three states, because the gateway states three
+    /// kinds of thing: it approved, it refused (declined/failed), or it does not know yet — and the
+    /// third is neither of the first two. Anything not stated final is pending, which is also what
+    /// the SDK stored and keeps polling for.
+    enum ResultState {
+        case approved, pending, refused
+
+        init(responseStatus: String?) {
+            switch responseStatus?.trimmingCharacters(in: .whitespaces).uppercased() {
+            case "APPROVED": self = .approved
+            case "DECLINED", "FAILED": self = .refused
+            default: self = .pending
+            }
+        }
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -29,8 +45,8 @@ struct ScanToPayView: View {
                 confirm(payment, busy: false)
             case .paying(let payment):
                 confirm(payment, busy: true)
-            case .result(let success, let headline, let detail):
-                result(success: success, headline: headline, detail: detail)
+            case .result(let state, let headline, let detail):
+                result(state: state, headline: headline, detail: detail)
             }
         }
         .navigationTitle("Scan to pay")
@@ -153,13 +169,28 @@ struct ScanToPayView: View {
         withAnimation { stage = .paying(payment) }
         do {
             let outcome = try await VeyraWallet.shared.tokenisation.payScannedContext(payment)
+            // The push answers with a status, not just a code, and PENDING is a real
+            // answer — the payer must not be told they were refused when the SDK has stored the
+            // payment as unresolved and is still polling for it.
+            let state = ResultState(responseStatus: outcome.responseStatus)
             withAnimation {
-                stage = .result(
-                    success: outcome.approved,
-                    headline: outcome.approved ? "Payment approved" : "Payment declined",
-                    detail: outcome.approved ? "₦\(payment.amount) to \(payment.merchantName)"
-                        : (outcome.message ?? "The payment was not approved (\(outcome.responseCode ?? "no code"))."),
-                )
+                switch state {
+                case .approved:
+                    stage = .result(state: state, headline: "Payment approved",
+                                    detail: "₦\(payment.amount) to \(payment.merchantName)")
+                case .pending:
+                    stage = .result(
+                        state: state, headline: "Payment pending",
+                        detail: "The bank has not confirmed this yet (\(outcome.responseCode ?? "no code")). "
+                            + "It will appear in your transactions once it settles."
+                    )
+                case .refused:
+                    stage = .result(
+                        state: state, headline: "Payment declined",
+                        detail: outcome.message
+                            ?? "The payment was not approved (\(outcome.responseCode ?? "no code"))."
+                    )
+                }
             }
         } catch VeyraWalletError.onlineRequired(let message) {
             // The card must go online before it can pay — friendly, actionable copy.
@@ -174,11 +205,11 @@ struct ScanToPayView: View {
 
     // ── Result ──────────────────────────────────────────────────────────────────────────────
 
-    private func result(success: Bool, headline: String, detail: String?) -> some View {
+    private func result(state: ResultState, headline: String, detail: String?) -> some View {
         VStack(spacing: 16) {
-            Image(systemName: success ? "checkmark.circle.fill" : "xmark.circle.fill")
+            Image(systemName: resultSymbol(state))
                 .font(.system(size: 64))
-                .foregroundStyle(success ? .green : Brand.crimson)
+                .foregroundStyle(resultTint(state))
             Text(headline).font(.title2.weight(.semibold))
             if let detail {
                 Text(detail).font(.subheadline).foregroundStyle(.secondary)
@@ -192,6 +223,22 @@ struct ScanToPayView: View {
                 .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func resultSymbol(_ state: ResultState) -> String {
+        switch state {
+        case .approved: return "checkmark.circle.fill"
+        case .pending: return "clock.fill"
+        case .refused: return "xmark.circle.fill"
+        }
+    }
+
+    private func resultTint(_ state: ResultState) -> Color {
+        switch state {
+        case .approved: return .green
+        case .pending: return .orange
+        case .refused: return Brand.crimson
+        }
     }
 }
 

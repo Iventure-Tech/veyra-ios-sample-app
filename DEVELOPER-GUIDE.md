@@ -950,13 +950,16 @@ The response codes underneath are shared on the wire across rails; where a code 
 
 ### Digitisation & eligibility — `responseCode`
 
-Exactly three values on both eligibility and digitise responses:
+Three values, and a rule for everything else, on both eligibility and digitise responses:
 
 | Code | Meaning | What to do |
 |---|---|---|
 | `"APPROVED"` | Eligible / provisioned and active | Card is ready — show it in the wallet. |
 | `"APPROVE_REQUIRE_AUTH"` | Provisioned, needs activation | Run the activation flow with the returned `activationMethods`. |
 | `"DECLINED"` | Refused | Show `message` (it carries the reason — e.g. the account falls outside your configured provision-context allow-lists). Flow ends. |
+| Any other code (or none) | Not recognised by this SDK version | The token is **discarded** — nothing provisioned, no card added, even if the response carried full token data. Show the error and offer a retry; update the SDK if it persists. |
+
+The last row is a **throw**, not a returned code: `digitise` fails with `VeyraWalletError.unrecognisedResponseCode(message:)`, whose message quotes the raw code. A token whose terms the SDK cannot interpret is never installed on a guess — so the wallet is left exactly as it was, and the SDK asks the backend to release the token it minted.
 
 ### Activation — `status` + `failureCode`
 
@@ -1015,6 +1018,7 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | `.amountExceedsCardLimit` | Wallet payments | **Not by retrying** | The amount exceeds the card's per-payment limit. Going online does **not** help — offer a smaller amount or another card. |
 | `.tokenNotActive` | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
 | Digitise `"DECLINED"` | Add card | Per `message` | Show the server's message; the flow ends. Common cause: the account falls outside your provision-context allow-lists. |
+| `.unrecognisedResponseCode` | Add card | Yes | Digitisation answered with a code this SDK version does not know, so the token was discarded and no card was added. Retry; if it persists, update the Veyra SDK. |
 | Activation `"FAILURE"` | Activation | Per `message` | Branch on the [known messages](#activation--status--failure-messages): resend on expiry, cool-down on the rate cap, stop entirely on lockout ("contact your issuer"). |
 | `.tapRefused` | Combined apps | Yes (after mode settles) | The other mode's payment is mid-flight — prompt to finish/cancel it. |
 
@@ -1033,7 +1037,7 @@ public struct StoredCard {                  // wallet card display record
     let cardHolderName: String      // "AFRIGO ****1234" — scheme + masked last four, not a person
     let accountHolderName: String
     let bankName: String?
-    let status: String                      // e.g. "APPROVED", "APPROVE_REQUIRE_AUTH", "SUSPENDED"
+    let status: String                      // lifecycle: "ACTIVE", "PENDING_ACTIVATION", "SUSPENDED", "EXPIRED"
     let requiresActivation: Bool
     let isActive: Bool                      // the card payments use
     let requiresOnline: Bool                // grey out + prompt to connect

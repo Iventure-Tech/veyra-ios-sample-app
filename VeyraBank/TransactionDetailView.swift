@@ -52,6 +52,12 @@ struct TransactionDetailView: View {
                 if let location = tx.merchantLocation, !location.isEmpty {
                     row("Location") { Text(location) }
                 }
+                // The merchant's own order id — always a row, em-dash when absent: a tap/CPM row
+                // learns the value from the status poll, so absence often means "not learned yet".
+                // Read from the live row so a poll that lands during the visit fills it in.
+                row("Merchant order ID") {
+                    Text(orDash(liveRow.merchantOrderID)).font(.subheadline.monospaced())
+                }
                 row("Status") {
                     Text(statusText)
                         .font(.subheadline.weight(.semibold))
@@ -115,6 +121,13 @@ struct TransactionDetailView: View {
                         }
                     }
                     .padding(.vertical, 2)
+
+                    // The credit leg's own id — what a bank is quoted when a merchant says the
+                    // money never arrived. Same gate as the credit status above (this section);
+                    // em-dash rather than a blank.
+                    row("Credit transaction ID") {
+                        Text(orDash(liveRow.creditTransactionID)).font(.subheadline.monospaced())
+                    }
 
                     // "Check merchant credit" — the manual ask beside the SDK's own 30-day credit
                     // sweep. Shown on exactly the predicate the SDK enforces internally: approved,
@@ -219,6 +232,13 @@ struct TransactionDetailView: View {
             value()
         }
         .font(.subheadline)
+    }
+
+    /// An absent value renders as an em-dash — a row is never blank and never dropped, so a
+    /// missing order/credit id reads as absence rather than data loss.
+    private func orDash(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "—" }
+        return value
     }
 
     // ── Data ────────────────────────────────────────────────────────────────────────────────

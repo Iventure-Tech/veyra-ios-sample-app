@@ -96,6 +96,11 @@ struct MerchantTransactionsView: View {
                         Text(t).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+                // Your own order id — always a line, em-dash when the sale carried none (the
+                // same labels and null rendering as the wallet's detail). This list *is* the
+                // merchant's transaction detail on iOS.
+                Text("Your order ID: \((tx.merchantOrderID?.isEmpty == false ? tx.merchantOrderID! : "—"))")
+                    .font(.caption2).foregroundStyle(.secondary)
                 // The outcome's stated cause + code, verbatim from the backend (e.g.
                 // "51 · INSUFFICIENT_FUNDS"); unresolved/legacy rows carry neither.
                 if let reason = tx.responseStatusReason, !reason.isEmpty {
@@ -112,6 +117,13 @@ struct MerchantTransactionsView: View {
                     Text(credit == "RECEIVED" ? "Funds received by merchant bank" : "Bank credit could not be confirmed")
                         .font(.caption2)
                         .foregroundStyle(credit == "RECEIVED" ? Color.green : Color.secondary)
+                }
+                // The credit leg's own id — what you quote to a bank when chasing the settlement.
+                // Shown only where the confirmation rail applies at all: with no rail there is
+                // nothing to quote. Em-dash rather than a blank, matching the wallet's detail.
+                if tx.isCreditConfirmationSupported == true {
+                    Text("Credit transaction ID: \((tx.creditTransactionID?.isEmpty == false ? tx.creditTransactionID! : "—"))")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 // "Check merchant credit" — the manual ask beside that sweep. Shown on exactly the
                 // predicate the SDK enforces internally: approved, the merchant's bank on the

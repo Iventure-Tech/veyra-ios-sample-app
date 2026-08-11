@@ -449,6 +449,9 @@ let transactions = try await VeyraSoftPOS.shared.transactions.history(limit: 50)
 // railLabel ("Tap" / "QR" / "Scan"), amountMinorUnits,
 // currencyNumeric, status ("APPROVED"/"DECLINED"/"PENDING"/"FAILED"), responseCode,
 // transactionTime, transactionID, maskedTokenLast4, transactionHash,
+// merchantOrderID (your own order/basket id as supplied on the charge — your reconciliation
+// key back to your POS/till, nil on sales that carried none; display only, never a lookup
+// key: receipts and status refreshes key off reference),
 // cardholderName (EMV 5F20 as the card presented it — nil on QR-MPM),
 // creditTransactionID + isCreditConfirmationSupported (the merchant-bank credit's identifier
 // and whether that bank can confirm it — populated on approved sales only),
@@ -942,7 +945,7 @@ let history = try await VeyraWallet.shared.tokenisation
     .transactionHistory(tokenUniqueReference: ref, limit: 100)
 ```
 
-`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, plus the five beneficiary-credit fields below.
+`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderID` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, generated-QR rows learn it from the status poll, so `nil` on a still-open row means "not learned yet", not "no order id"; **display only, never a lookup key** — receipts and status refreshes still key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
 ##### `observeTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
 
@@ -985,7 +988,7 @@ a cue to wait.
 |---|---|
 | `isCreditConfirmationSupported: Bool?` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line **and may offer the manual check**. `false`/`nil` ⇒ there is nothing to ask — render **no** credit UI for that transaction, and **do not call `refreshCreditConfirmation`**. |
 | `creditConfirmationStatus: String?` | `nil` = no answer yet (with the gate `true`, that is the "confirming…" state) · `"RECEIVED"` = terminal, the funds are confirmed in the merchant's account · `"UNABLE_TO_CONFIRM"` = the 30-day sweep stopped asking. |
-| `creditTransactionID: String?` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — display/support only; never pass it back to the SDK. |
+| `creditTransactionID: String?` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — **what you quote to a bank** when the merchant says the money never arrived. Display/support only; never pass it back to the SDK, and render it only where the gate above is `true` — a bare id with no confirmation line reads as a promise. |
 | `creditedAt: String?` | When the beneficiary bank posted the credit. `"RECEIVED"` only. |
 | `bankReference: String?` | The beneficiary bank's own reference for the credit. `"RECEIVED"` only. |
 
@@ -1042,6 +1045,27 @@ Unlike the scheduled sweep it ignores both the backoff and the 30-day window —
 ```swift
 try await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
 ```
+
+#### `refreshTransactionStatus`
+
+```swift
+// Returns the updated row, or nil if no row carries that hash.
+let updated = try await VeyraWallet.shared.tokenisation
+    .refreshTransactionStatus(transactionHash: summary.transactionHash)
+```
+
+The **per-transaction** counterpart to `reconcilePendingTransactions`, which asks about every open
+row and returns nothing — this one answers about the row the customer is actually looking at, keyed
+by its `transactionHash`.
+
+The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30
+days**. Polling never invents an outcome — a row that ages out simply stops being asked about and
+stays `PENDING`. Expose this in your UI so the customer can ask on demand, which is the only route
+to an answer once the window has closed.
+
+Show it **only while the row is `PENDING`**: a settled row has nothing to ask about. It throws
+rather than returning `nil` when the device is offline (`noNetworkConnection`) — `nil` means "the
+backend has no such row", which is a different answer and must not be shown as a network problem.
 
 #### `tokenisation.processReceipt` / `receipts` / `receipt(forTransactionHash:)`
 
@@ -1417,6 +1441,7 @@ public struct TransactionSummary {          // wallet history row
     let entryMethod: String?                // "TAP" / "QR_GENERATED" / "QR_SCANNED" / nil
     let merchantLocation: String?; let transactionHash: String?
     let atEpochMillis: Int64?; let merchantTransactionReference: String?; let merchantId: String?
+    let merchantOrderID: String?            // the merchant's own order id; display only, never a key
     // Beneficiary credit confirmation — settlement only, never the payment outcome.
     let creditTransactionID: String?           // credit-leg id; display/support only
     let isCreditConfirmationSupported: Bool?   // THE GATE: true ⇒ SDK is polling, render the line
@@ -1444,7 +1469,7 @@ public struct PaymentContextQR { let txRef: String; let expiry: String?; let kid
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }
 public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String; let cardholderName: String? }
 public struct CustomerQrChargeOutcome { let approved: Bool; let responseCode: String?; let transactionID: String?; let reference: String; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }
-public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let responseStatusReason: String?; let transactionTime: String?; let transactionID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?; let creditConfirmationStatus: String? }
+public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let responseStatusReason: String?; let transactionTime: String?; let transactionID: String?; let merchantOrderID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?; let creditConfirmationStatus: String? }
 public struct CreditConfirmation { let creditTransactionID: String; let status: String; let amountMinorUnits: Int64?; let creditedAt: String?; let bankReference: String?; let message: String? }   // the on-demand fetch's reply
 public struct TransactionResolution { let reference: String; let responseCode: String?; let status: String; let reason: String? }   // transactions.onTransactionResolved payload
 public struct SaleCreditConfirmation { let reference: String; let creditTransactionID: String?; let status: String; let amountMinorUnits: Int64?; let bankReference: String?; let creditedAt: String? }   // transactions.onCreditConfirmation payload

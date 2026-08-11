@@ -88,9 +88,15 @@ struct PayView: View {
         // drops to inert by itself — no screen choreography needed here.
         .onAppear {
             Task { await reload() }
+            observeCardState()
         }
         // The app-level scene hook runs the SDK's lifecycle sync; reload afterwards so
         // the wallet reflects any status change (suspended card greys, deactivated card leaves).
+        //
+        // This stays even though the SDK now pushes those changes: the observers below do not
+        // replay, so a change applied while this app was suspended is learned here, on the way
+        // back in. The push covers "while you are looking at it"; the read covers "while you
+        // were away".
         .onChange(of: scenePhase) { phase in
             guard phase == .active else { return }
             Task { await reload() }
@@ -308,6 +314,26 @@ struct PayView: View {
     private func activeCardBlocked(_ cards: [StoredCard]) -> Bool {
         guard let active = cards.first(where: { $0.isActive }) else { return false }
         return active.requiresOnline || active.status.uppercased() == "SUSPENDED"
+    }
+
+    /// Subscribe to the two card-state pushes.
+    ///
+    /// Registered once here rather than per card: the issuer can suspend a card while this screen
+    /// is *already up*, which is exactly when no re-read is coming and the card would otherwise
+    /// stay drawn as usable until the customer taps it and it fails.
+    ///
+    /// Callbacks arrive on the main thread, so touching state here is safe. Registration is
+    /// single-listener ("last registration wins"), so appearing twice replaces rather than stacks.
+    private func observeCardState() {
+        try? VeyraWallet.shared.tokenisation.observeTokenLifecycle { _ in
+            // Re-read rather than patching the row from the payload: the store is the source of
+            // truth and one card changing can change the list (a DEACTIVATED card leaves it).
+            Task { await reload() }
+        }
+        // Keys ran out, or a refresh replenished them — `requiresOnline` drives `activeCardBlocked`.
+        try? VeyraWallet.shared.tokenisation.observeCardKeyState { _, _ in
+            Task { await reload() }
+        }
     }
 
     private func reload() async {

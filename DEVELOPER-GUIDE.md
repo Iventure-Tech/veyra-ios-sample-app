@@ -120,7 +120,7 @@ let merchant = VeyraSoftPOS.shared.merchant
 |--------|-------------|
 | `configure(_:)` | Configure the SDK. Call once, before any service use (subsequent calls reconfigure). |
 | `shared` | The singleton. |
-| `merchant` | Merchant lifecycle — registration, status, activate/deactivate, profile update, banks, stored merchant. |
+| `merchant` | Merchant lifecycle — registration, status, activate/deactivate, profile update, banks, stored merchant, and `onMerchantStatusChanged` (the SDK watches the merchant's backend status for you). |
 | `tap` | Contactless tap acceptance — the customer's Android Veyra wallet taps this iPhone. |
 | `payments` | QR payments — create/poll a get-paid QR (merchant-presented) and inspect/charge a customer QR (consumer-presented). |
 | `transactions` | Transaction queries — local history, receipts, status polling — and the two deferred-answer observers (`onTransactionResolved`, `onCreditConfirmation`). |
@@ -845,23 +845,50 @@ case .rejected(let reason, _): showRejected(reason)          // .malformed/.miss
 
 The verified context carries `merchantName`, `merchantCity`, `amount` (display string), `amountMinorUnits`, `currencyNumeric`, `txRef`, `expiryEpochSeconds` — render these on the confirm screen; the customer never keys an amount.
 
-#### `authenticateForScannedPayment`
+#### Device authentication (CDCVM) — the SDK asks, you don't
 
-Biometric confirmation (system prompt; passcode/credential fallback allowed by default). On success the SDK records a **fresh, single-use** authentication — exactly one payment (or one QR render) consumes it. Put the merchant and amount in the prompt so the gesture is visibly bound to what it authorises.
+**There is no authentication method to call.** `payScannedContext` and `showQrToPay` present the
+system `LocalAuthentication` sheet themselves — Face ID or Touch ID, falling back to the device
+passcode — before building the payment. You cannot build a QR payment flow that skips it, and you
+cannot forget to sequence it.
+
+The SDK composes the sheet's text from the payment it is about to make, so the gesture is visibly
+bound to what it authorises: *"Pay ₦5,000.00 to Ada's Store"*. It asks **once per payment
+attempt** — a retry, or regenerating an expired QR, asks again.
+
+Three typed errors can be thrown, and they need different UI:
+
+| Error | What happened | What to do |
+|---|---|---|
+| `VeyraWalletError.authenticationCancelled` | The customer dismissed the sheet | Stay put and let them try again — nothing was sent |
+| `VeyraWalletError.authenticationFailed` | They tried and it did not succeed | Offer a retry |
+| `VeyraWalletError.authenticationUnavailable` | This device has **no** enrolled biometry *and* **no** passcode | Send them to Settings; a retry can never succeed |
+
+The sheet appears only **after** the card checks pass, so a card that is out of keys, over its limit
+or not active is refused without spending the customer's gesture.
+
+**Changing the wording or the language.** Set these once on `VeyraWalletConfiguration` — `{amount}`
+and `{merchant}` are substituted:
 
 ```swift
-do {
-    try await VeyraWallet.shared.tokenisation.authenticateForScannedPayment(
-        reason: "Pay ₦\(payment.amount) to \(payment.merchantName)")
-} catch {
-    // cancelled/failed — stay on the confirm screen; nothing was sent
-    return
-}
+VeyraWalletConfiguration(
+    environment: .test,
+    appleTeamID: "ABCDE12345",
+    cdcvmAllowDeviceCredential: true,          // false = biometry only, no passcode fallback
+    cdcvmPaySubtitle: "Send {amount} to {merchant}",
+    cdcvmShowQrSubtitle: "Code for {amount}"
+)
 ```
+
+> iOS shows a **single** string in the sheet, so the *subtitle* is what the customer reads — it is
+> the one carrying the merchant and amount. Overriding only a title has no visible effect here.
+
+> **There is no tap-to-pay on iOS**, so unlike Android this is the only place CDCVM applies.
 
 #### `payScannedContext`
 
-Pay the verified context with the wallet's **active card**. Requires the fresh authentication above (the SDK enforces one per payment). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
+Pay the verified context with the wallet's **active card**. The SDK presents the authentication
+sheet itself first (above). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
 
 **Branch on `responseStatus`, not on `approved` or the response code.** The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one.
 
@@ -881,7 +908,7 @@ default: showPending(outcome.responseCode)
 
 ### Show QR to pay (customer-presented)
 
-The customer keys nothing at the till: your app asks the amount first (the merchant states it), authenticates, and renders a **dynamic payment QR** with the amount cryptographically bound inside. Fully offline — the merchant's SoftPOS submits the payment; the outcome lands in history via reconciliation.
+The customer keys nothing at the till: your app asks the amount first (the merchant states it) and renders a **dynamic payment QR** — the SDK handles the authentication with the amount cryptographically bound inside. Fully offline — the merchant's SoftPOS submits the payment; the outcome lands in history via reconciliation.
 
 #### `showQrToPay` + `cancelQrExpiry`
 
@@ -890,11 +917,9 @@ The customer keys nothing at the till: your app asks the amount first (the merch
 | `amountMinorUnits` | **Mandatory** | The merchant-stated amount — bound into the QR's cryptogram; the merchant's scan charges exactly this or fails. |
 | `onExpired` | Optional | Fired **once, on the main thread**, when the QR lapses — blank or replace the code (a dimmed QR is still scannable). A new render supersedes the watch; `cancelQrExpiry()` stops it (call on screen teardown). |
 
-Requires a fresh `authenticateForScannedPayment` first — **one authentication per QR**; regenerating after expiry needs a new one.
+The SDK presents the authentication sheet itself — **one gesture per QR**; regenerating after expiry is a fresh payment attempt and asks again.
 
 ```swift
-try await VeyraWallet.shared.tokenisation.authenticateForScannedPayment(
-    reason: "Show a QR to pay ₦\(String(format: "%.2f", Double(amount) / 100))")
 let qr = try await VeyraWallet.shared.tokenisation.showQrToPay(amountMinorUnits: amount) {
     expired = true       // blank the code
 }
@@ -918,6 +943,33 @@ let history = try await VeyraWallet.shared.tokenisation
 ```
 
 `TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, plus the five beneficiary-credit fields below.
+
+##### `observeTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
+
+A wallet payment that gets no immediate answer is stored and polled by the SDK until the backend
+settles it — seconds, or days. Unresolved rows are visible in history, so the customer can be
+looking at the row at the moment it settles. This is how your app hears it without polling:
+
+```swift
+try VeyraWallet.shared.tokenisation.observeTransactionResolved { resolution in
+    // resolution.transactionHash      — which payment (match your row on this)
+    // resolution.tokenUniqueReference — the card that paid
+    // resolution.status               — APPROVED / DECLINED / FAILED (never PENDING)
+    // resolution.responseCode         — the wire literal, for receipts and support
+    // resolution.reason               — e.g. INSUFFICIENT_FUNDS — display, never parse
+    // resolution.amountMinorUnits, resolution.merchantName
+}
+```
+
+**This is not the same channel as `VeyraSoftPOS.shared.transactions.onTransactionResolved`**, and
+the two are not interchangeable: that one is the *merchant's* side of a payment and identifies a
+sale by the reference the merchant's own app supplied — a value a wallet never sees. The wallet
+keys on `transactionHash`.
+
+Fires only on a genuine `PENDING` → final transition: a poll that leaves the row pending, and a
+later write that backfills merchant details onto an already-final row, both wake nothing. Register
+once at start-up, no replay (read the history when a screen appears), last registration wins,
+delivered on the main thread. `stopObservingTransactionResolved()` clears it.
 
 ##### Merchant credit confirmation (wallet side)
 
@@ -1065,7 +1117,7 @@ Terminal outcomes only — unsupported cards and lost contact **never** produce 
 
 The response codes underneath are shared on the wire across rails; where a code surfaces (`responseCode` fields, history rows), handle it as follows:
 
-> **Read `response_status`, not the code (STORY-98 / ISSUE-140).** Every payment outcome now carries a
+> **Read `response_status`, not the code.** Every payment outcome now carries a
 > triple: `response_code` (what the wire said), `response_status` (**what to do**) and
 > `response_status_reason` (why). Branch on `response_status` only — `APPROVED`, `DECLINED`, `FAILED`
 > or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
@@ -1142,9 +1194,89 @@ The wallet syncs each card's server status automatically (foreground sweeps and 
 | `SUSPENDED` / `EXPIRED` / `PENDING_ACTIVATION` | Card refuses to pay (`.tokenNotActive`); `StoredCard.status` shows the status | Render the card as unavailable. **Not sticky** — a later sync unfreezes it automatically. |
 | `DEACTIVATED` | The card and all its material are wiped and it disappears from `tokens()` | Refresh your card list; the user re-adds the card if needed. |
 
+#### `observeTokenLifecycle` — the SDK tells you when a card's status changes
+
+Reading the table above on your next render is not always soon enough. The sweep can apply
+`SUSPENDED` while the customer is *looking at* a card screen — so the card stays drawn as usable,
+they tap, and it fails. Subscribe and you are told the moment it is applied:
+
+```swift
+try VeyraWallet.shared.tokenisation.observeTokenLifecycle { change in
+    // change.tokenUniqueReference — which card (it fires for any stored card)
+    // change.status               — ACTIVE / SUSPENDED / EXPIRED / DEACTIVATED /
+    //                               PENDING_ACTIVATION / UNKNOWN
+    // change.rawStatus            — the literal as stored; log this one
+    // change.canPay               — whether the card can pay right now
+    // change.previousStatus       — what it held before, or nil if this is its first status
+}
+```
+
+- **Branch on `canPay`, not on `status`.** It is the same predicate the SDK's own payment gates
+  use, so a status added to the backend after your build shipped is correctly reported as *not*
+  payable instead of falling through a `switch` that has never heard of it.
+- **Register once, at start-up** — not per card screen. The card that matters is the one no screen
+  is showing.
+- **It does not replay.** If your app was not running when the issuer suspended the card, nothing
+  is queued — read `tokens()` when a screen appears. The observer is a convenience over the store,
+  not a delivery guarantee, so keep the read path.
+- **Only genuine changes fire.** A sweep re-applying the status a card already had wakes nothing.
+- **Last registration wins**; `stopObservingTokenLifecycle()` clears it. No subscription token.
+- Delivered on the main thread.
+
+#### `observeCardKeyState` — a card ran out of payment keys, or got them back
+
+`StoredCard.requiresOnline` tells you a card cannot pay until the SDK refreshes its keys. This is
+the push version of that same value — and it *is* the same value, because the observer and
+`tokens()` read one function, so a callback can never contradict the list you are about to draw.
+
+```swift
+try VeyraWallet.shared.tokenisation.observeCardKeyState { tokenUniqueReference, requiresOnline in
+    // grey the card, or un-grey it
+}
+```
+
+**Read this limit before you word your UI.** It fires from the two moments the SDK is actually
+executing: a payment consuming a key, and a refresh delivering new ones. Payment keys *also* expire
+by clock, which happens with no SDK code running at all — **nothing fires for that**, and such a
+card simply reads as `requiresOnline` on your next `tokens()`. The first evaluation of a card after
+launch is a silent baseline, for the same reason. Keep reading the card list when a screen appears.
+
+Observation only: there is deliberately no API to trigger a key refresh — the SDK owns when keys
+are replenished. `stopObservingCardKeyState()` clears it.
+
 ### Merchant statuses
 
 `ACTIVE` / `INACTIVE` / `SUSPENDED` / `DEACTIVATED` (on registration results, `status()` responses and every payment response's `merchantStatus`). Payments are refused client-side unless the merchant is `ACTIVE` — gate your get-paid entry on `merchant.isRegistered` and the stored merchant's last known status, and call `status(merchantID:)` while awaiting activation.
+
+#### `merchant.onMerchantStatusChanged` — the SDK now watches it for you
+
+The SDK polls the registered merchant's status in the background and tells you when it changes:
+
+```swift
+try VeyraSoftPOS.shared.merchant.onMerchantStatusChanged { change in
+    // change.merchantID, change.status, change.previousStatus
+    if !change.canAcceptPayments { disableGetPaid() }
+}
+```
+
+Two uses: stop offering to take payments the moment a merchant is deactivated mid-session, rather
+than at the next screen load; and catch the **activation** moment after registration without
+polling for it yourself — which previously you had to, by calling `status(merchantID:)` on a timer
+of your own.
+
+**Branch on `canAcceptPayments`, not on `status`** — it is the same reading the client-side payment
+gate uses, so you cannot end up more permissive than the gate that will refuse the sale. Anything
+that is not `ACTIVE`, including a status newer than your build, is `false`.
+
+**The polling is the SDK's and is app-scoped, not screen-scoped.** It starts at `configure` (and
+after a successful `register`), keeps running as the merchant navigates, and no screen may start or
+stop it. One platform boundary, stated plainly: iOS suspends timers when the OS suspends your app,
+so polling pauses while backgrounded and resumes on foreground. **No answer is lost** — the status
+lives in the SDK's store and the comparison is against what was persisted, so a change that
+happened while you were away still arrives on the first poll after you return.
+
+Only genuine changes fire, registration is single-listener with last-registration-wins, there is no
+replay, and delivery is on the main thread. `stopObservingMerchantStatus()` clears it.
 
 ### History status vocabularies
 
@@ -1214,6 +1346,24 @@ public struct StoredCard {                  // wallet card display record
     let requiresActivation: Bool
     let isActive: Bool                      // the card payments use
     let requiresOnline: Bool                // grey out + prompt to connect
+}
+
+// tokenisation.observeTokenLifecycle payload — branch on canPay, not on status
+public struct TokenStatusChange {
+    let tokenUniqueReference: String; let status: String; let rawStatus: String
+    let canPay: Bool; let previousStatus: String?
+}
+// tokenisation.observeTransactionResolved payload — keyed on transactionHash, NOT on a
+// merchant reference (that is the merchant SDK's separate channel)
+public struct WalletTransactionResolution {
+    let transactionHash: String; let tokenUniqueReference: String?; let status: String
+    let responseCode: String?; let reason: String?
+    let amountMinorUnits: Int64; let merchantName: String
+}
+// merchant.onMerchantStatusChanged payload — branch on canAcceptPayments, not on status
+public struct MerchantStatusChange {
+    let merchantID: String; let status: String
+    let canAcceptPayments: Bool; let previousStatus: String?
 }
 
 public struct Bank { let slug: String; let name: String; let institutionCode: String }
@@ -1388,7 +1538,7 @@ Camera scan ──► inspectScannedQr
                     └─ verified ──► confirm screen (merchant + the QR's amount)
                                         │ user confirms
                                         ▼
-                          authenticateForScannedPayment (Face ID / biometric)
+                          SDK presents the Face ID / passcode sheet itself
                                         ├─ failed/cancelled ──► stay on confirm screen
                                         ▼ success (single-use)
                               payScannedContext

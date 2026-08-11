@@ -155,17 +155,9 @@ struct ScanToPayView: View {
 
     private func pay(_ payment: VerifiedPayment) async {
         confirmError = nil
-        // 1. CDCVM: the system Face ID / Touch ID sheet. Failure/cancel stays on confirm —
-        //    the SDK recorded nothing and refuses to pay without it.
-        do {
-            try await VeyraWallet.shared.tokenisation.authenticateForScannedPayment(
-                reason: "Pay ₦\(payment.amount) to \(payment.merchantName)"
-            )
-        } catch {
-            confirmError = "Authentication didn't complete — try again."
-            return
-        }
-        // 2. Push with the active token (the recorded authentication covers exactly this payment).
+        // No authentication call here — payScannedContext raises the system Face ID / Touch ID
+        // sheet itself, naming this merchant and amount, and answers with a typed authentication
+        // error if the customer cancels or it fails.
         withAnimation { stage = .paying(payment) }
         do {
             let outcome = try await VeyraWallet.shared.tokenisation.payScannedContext(payment)

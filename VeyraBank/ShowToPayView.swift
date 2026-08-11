@@ -144,12 +144,10 @@ struct ShowToPayView: View {
         errorMessage = nil
         phase = .working
         do {
-            // One authentication per QR render — a regenerate re-authenticates (SDK-enforced).
-            try await VeyraWallet.shared.tokenisation.authenticateForScannedPayment(
-                reason: "Show a QR to pay ₦\(String(format: "%.2f", Double(amount) / 100))"
-            )
-            // The SDK owns the expiry timer and fires onExpired when the QR lapses —
-            // blank the code then (an expired QR must not stay scannable).
+            // No authentication call — showQrToPay raises the system sheet itself, once per
+            // render, so a regenerate after expiry asks again on its own.
+            // The SDK owns the expiry timer and fires onExpired when the QR lapses — blank the
+            // code then (an expired QR must not stay scannable).
             let qr = try await VeyraWallet.shared.tokenisation.showQrToPay(amountMinorUnits: amount) {
                 expired = true
             }
@@ -160,6 +158,12 @@ struct ShowToPayView: View {
             settled = nil
             phase = .showing(qr, image)
             startReconcilePolling(for: qr)
+        } catch VeyraWalletError.authenticationCancelled {
+            // The customer dismissed the sheet — back to amount entry, no error banner.
+            phase = .amountEntry
+        } catch VeyraWalletError.authenticationUnavailable(let message) {
+            errorMessage = message
+            phase = .amountEntry
         } catch VeyraWalletError.onlineRequired(let message) {
             // The card must go online before a payment QR can be produced.
             errorMessage = message

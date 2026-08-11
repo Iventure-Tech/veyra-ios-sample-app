@@ -136,9 +136,9 @@ struct MerchantTransactionsView: View {
                 if let note = creditCheckNotes[tx.reference] {
                     Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
-                // Cardholder Name (EMV 5F20) as the card presented it — a Veyra token shows
-                // its display name, e.g. "AFRIGO ****1234". Absent on QR-MPM (the merchant
-                // never reads the card) and on rows recorded before the SDK captured it.
+                // The card's display name — a Veyra token shows e.g. "AFRIGO ****1234". Off
+                // EMV 5F20 on a tap, off the scanned QR on CPM, and from the gateway on QR-MPM
+                // (STORY-93). Absent only on rows recorded before the SDK captured it.
                 if let cardholder = tx.cardholderName, !cardholder.isEmpty {
                     Text(cardholder).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -310,8 +310,8 @@ struct ReceiptView: View {
             Text(receipt.merchantName).font(.subheadline.weight(.semibold))
             Text("₦" + receipt.totalAmountFormatted).font(.title3.weight(.bold))
             Text(receipt.maskedToken).font(.footnote).foregroundStyle(.secondary)
-            // The paying card as it presented itself (EMV 5F20) — merchant's copy only;
-            // absent on QR-MPM, where the merchant never reads the card.
+            // The paying card's display name — merchant's copy only. Every rail can carry it
+            // now: tap and CPM read it on the device, QR-MPM gets it from the gateway (STORY-93).
             if let cardholder = receipt.cardholderName, !cardholder.isEmpty {
                 Text(cardholder).font(.footnote).foregroundStyle(.secondary)
             }

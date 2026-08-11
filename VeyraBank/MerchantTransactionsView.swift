@@ -19,6 +19,9 @@ struct MerchantTransactionsView: View {
     // unconfirmed, or failed). Neither is durable state — the SDK's stored row is.
     @State private var checkingCredit: String?
     @State private var creditCheckNotes: [String: String] = [:]
+    // In-flight reference for the manual "check status" ask, and its per-row note.
+    @State private var checkingStatus: String?
+    @State private var statusCheckNotes: [String: String] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -137,8 +140,8 @@ struct MerchantTransactionsView: View {
                     Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
                 // The card's display name — a Veyra token shows e.g. "AFRIGO ****1234". Off
-                // EMV 5F20 on a tap, off the scanned QR on CPM, and from the gateway on QR-MPM
-                // (STORY-93). Absent only on rows recorded before the SDK captured it.
+                // EMV 5F20 on a tap, off the scanned QR on CPM, and from the gateway on QR-MPM.
+                // Absent only on rows recorded before the SDK captured it.
                 if let cardholder = tx.cardholderName, !cardholder.isEmpty {
                     Text(cardholder).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -311,7 +314,7 @@ struct ReceiptView: View {
             Text("₦" + receipt.totalAmountFormatted).font(.title3.weight(.bold))
             Text(receipt.maskedToken).font(.footnote).foregroundStyle(.secondary)
             // The paying card's display name — merchant's copy only. Every rail can carry it
-            // now: tap and CPM read it on the device, QR-MPM gets it from the gateway (STORY-93).
+            // now: tap and CPM read it on the device, QR-MPM gets it from the gateway.
             if let cardholder = receipt.cardholderName, !cardholder.isEmpty {
                 Text(cardholder).font(.footnote).foregroundStyle(.secondary)
             }

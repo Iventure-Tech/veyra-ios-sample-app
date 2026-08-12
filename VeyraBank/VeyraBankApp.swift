@@ -44,6 +44,9 @@ enum SampleConfig {
         VeyraSDK.configure(
             softpos: .init(
                 environment: .test,
+                // The provider credential the gateway resolves the acquirer id and MCC from —
+                // the same identifier the wallet configuration carries.
+                paymentAppProviderID: paymentAppProviderID,
                 clientID: clientID,
                 clientSecret: clientSecret
             ),

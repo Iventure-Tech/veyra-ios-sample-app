@@ -24,7 +24,7 @@ struct MerchantSettingsView: View {
     @State private var city = ""
     @State private var state = ""
     @State private var countryCode = ""
-    @State private var acquirerID = ""
+    @State private var walletAccountID = ""
     @State private var bvn = ""
     @State private var cacNumber = ""
     @State private var busy = false
@@ -58,7 +58,7 @@ struct MerchantSettingsView: View {
         _city = State(initialValue: s.city)
         _state = State(initialValue: s.state)
         _countryCode = State(initialValue: s.countryCode)
-        _acquirerID = State(initialValue: s.acquirerID)
+        _walletAccountID = State(initialValue: s.walletAccountID)
         _bvn = State(initialValue: s.bvn)
         _cacNumber = State(initialValue: s.cacNumber ?? "")
     }
@@ -103,7 +103,7 @@ struct MerchantSettingsView: View {
         city = sample.city
         state = sample.state
         countryCode = sample.countryCode
-        acquirerID = sample.acquirerID
+        walletAccountID = sample.walletAccountID
         bvn = sample.bvn
         cacNumber = sample.cacNumber ?? ""
     }
@@ -162,7 +162,7 @@ struct MerchantSettingsView: View {
             TextField("Account number", text: $accountNumber)
                 .keyboardType(.numberPad)
             bankRow
-            TextField("Acquirer ID", text: $acquirerID)
+            TextField("Wallet account ID (optional)", text: $walletAccountID)
             // BVN applies to both types; the CAC field only to a business.
             TextField("BVN", text: $bvn)
                 .keyboardType(.numberPad)
@@ -246,11 +246,13 @@ struct MerchantSettingsView: View {
                     city: city.trimmingCharacters(in: .whitespaces),
                     state: state.trimmingCharacters(in: .whitespaces),
                     countryCode: paddedCountry,
-                    bvn: isBusiness ? nil : bvn.trimmingCharacters(in: .whitespaces),
+                    // The BVN is submitted for BOTH merchant types — a business's account
+                    // holder has one too (optional for business).
+                    bvn: bvn.trimmingCharacters(in: .whitespaces).isEmpty ? nil : bvn.trimmingCharacters(in: .whitespaces),
                     cacNumber: isBusiness ? cacNumber.trimmingCharacters(in: .whitespaces) : nil,
                     accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                     institutionCode: selectedBankCode,
-                    acquirerID: acquirerID.trimmingCharacters(in: .whitespaces)
+                    walletAccountID: walletAccountID.trimmingCharacters(in: .whitespaces).isEmpty ? nil : walletAccountID.trimmingCharacters(in: .whitespaces)
                 )
             )
             if result.success {
@@ -284,8 +286,7 @@ struct MerchantSettingsView: View {
                     state: merchant.state,
                     countryCode: merchant.countryCode,
                     accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
-                    institutionCode: selectedBankCode.isEmpty ? merchant.institutionCode : selectedBankCode,
-                    acquirerID: merchant.acquirerID
+                    institutionCode: selectedBankCode.isEmpty ? merchant.institutionCode : selectedBankCode
                 )
             )
             resultText = "Profile updated (\(status.status ?? "OK"))"

@@ -147,9 +147,16 @@ let tokenisation = VeyraWallet.shared.tokenisation
 
 ### `VeyraSoftPOSConfiguration`
 
+> **Breaking change:** the initializer now requires a `paymentAppProviderID` — the globally
+> unique identifier issued to your organisation at onboarding, the same value your wallet
+> configuration carries. The gateway links every merchant you register to it and resolves the
+> acquirer id and MCC from it, so `acquirerID` no longer exists anywhere on the SoftPOS
+> surface: not here, and not on the registration/update models.
+
 ```swift
 let softposConfig = VeyraSoftPOSConfiguration(
     environment: .test,
+    paymentAppProviderID: "your-payment-app-provider-id",
     clientID: "your-client-id",
     clientSecret: "your-client-secret"
 )
@@ -160,6 +167,7 @@ let softposConfig = VeyraSoftPOSConfiguration(
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults — no URLs to supply. |
+| `paymentAppProviderID` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet configuration's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. |
 | `clientID` / `clientSecret` | **Mandatory** | OAuth client credentials. |
 
 ### `VeyraWalletConfiguration`
@@ -237,7 +245,7 @@ A device must have a **registered, active merchant** before it can accept paymen
 
 #### `merchant.register`
 
-Register the merchant on this device. Personal merchants require a BVN; business merchants require a CAC number. All other fields are mandatory for both.
+Register the merchant on this device. Personal merchants require a BVN; business merchants require a CAC number — and may supply a BVN too (the account holder behind a business has one). All other fields are mandatory for both, except `walletAccountID`. There is no acquirer id: the gateway resolves it from your payment app provider and returns it on the response.
 
 ```swift
 let result = try await VeyraSoftPOS.shared.merchant.register(
@@ -249,11 +257,11 @@ let result = try await VeyraSoftPOS.shared.merchant.register(
         addressLine1: "12 Marina Road",
         city: "Lagos", state: "Lagos",
         countryCode: "0566",               // ISO 3166-1 numeric, 4 digits
-        bvn: "12345678901",                // .personal only
+        bvn: "12345678901",                // required for .personal; optional for .business
         cacNumber: nil,                    // .business only
         accountNumber: "1234567890",       // settlement NUBAN account
         institutionCode: "000000",         // from merchant.banks()
-        acquirerID: "ACQ001"
+        walletAccountID: nil               // optional
     )
 )
 if result.success {
@@ -294,7 +302,7 @@ Payments are refused for inactive merchants — call `status(merchantID:)` at th
 
 #### `merchant.update`
 
-Update the merchant profile (terminal ID and MCC are preserved). All parameters are required except `addressLine2`.
+Update the merchant profile (terminal ID, MCC and the gateway-resolved acquirer id are preserved; the response re-states them and the SDK refreshes its stored copy). All parameters are required except `addressLine2`, `walletAccountID` and `bvn`.
 
 ```swift
 let status = try await VeyraSoftPOS.shared.merchant.update(
@@ -302,8 +310,7 @@ let status = try await VeyraSoftPOS.shared.merchant.update(
     MerchantUpdate(merchantName: "Ada's Store", emailAddress: "ada@example.com",
                    phoneNumber: "+2348012345678", addressLine1: "12 Marina Road",
                    city: "Lagos", state: "Lagos", countryCode: "0566",
-                   accountNumber: "1234567890", institutionCode: "000000",
-                   acquirerID: "ACQ001")
+                   accountNumber: "1234567890", institutionCode: "000000")
 )
 ```
 

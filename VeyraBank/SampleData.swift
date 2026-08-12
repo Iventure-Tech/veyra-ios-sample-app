@@ -29,7 +29,6 @@ struct SampleMerchant {
     let emailAddress = "ada.demo@example.com"
     let walletAccountID = "ada.demo@example.com"
     let mobileNumber = "2348000000000"
-    let acquirerID = "ACQ001"
     let addressLine1 = "12 Marina Street"
     let addressLine2 = "Lagos Island"
     let city = "Lagos"

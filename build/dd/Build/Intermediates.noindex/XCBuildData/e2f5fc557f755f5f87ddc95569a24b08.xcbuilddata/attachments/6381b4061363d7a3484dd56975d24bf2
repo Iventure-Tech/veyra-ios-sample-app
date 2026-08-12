@@ -1,4 +1,0 @@
-module VeyraSoftPOS {
-header "VeyraSoftPOS-Swift.h"
-export *
-}

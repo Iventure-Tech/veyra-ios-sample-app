@@ -1,4 +1,0 @@
-module VeyraSDK {
-header "VeyraSDK-Swift.h"
-export *
-}

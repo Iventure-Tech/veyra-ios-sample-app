@@ -1,0 +1,4 @@
+module VeyraWallet {
+header "VeyraWallet-Swift.h"
+export *
+}

@@ -1,0 +1,8 @@
+framework module "VeyraKMP" {
+    umbrella header "VeyraKMP.h"
+
+    export *
+    module * { export * }
+
+    use Foundation
+}

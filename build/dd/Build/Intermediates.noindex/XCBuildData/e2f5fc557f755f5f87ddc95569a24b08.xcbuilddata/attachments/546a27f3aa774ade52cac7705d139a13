@@ -1,0 +1,119 @@
+{
+  "" : {
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBank-primary.dia",
+    "emit-module-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBank-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBank-primary-emit-module.dia",
+    "pch" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBank-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBank-primary.swiftdeps"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/AddCardView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/AddCardView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/GetPaidView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/GetPaidView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/MerchantSettingsView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantSettingsView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/MerchantTransactionsView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/MerchantTransactionsView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/PayView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/PayView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/SampleData.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/SampleData~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/ScanToPayView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ScanToPayView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/ShowToPayView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/ShowToPayView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/TransactionDetailView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionDetailView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/TransactionsView.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/TransactionsView~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/VeyraBank/VeyraBankApp.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp.dia",
+    "index-unit-output-path" : "/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraBank.build/Debug-iphonesimulator/VeyraBank.build/Objects-normal/arm64/VeyraBankApp~partial.swiftmodule"
+  }
+}

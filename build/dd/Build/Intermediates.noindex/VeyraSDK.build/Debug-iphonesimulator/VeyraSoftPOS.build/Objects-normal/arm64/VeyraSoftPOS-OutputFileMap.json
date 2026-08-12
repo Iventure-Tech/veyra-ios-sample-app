@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS-primary.dia",
+    "emit-module-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS-primary-emit-module.dia",
+    "pch" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS-primary.swiftdeps"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-sdk/swift/Sources/VeyraSoftPOS/StoredMerchant.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant.dia",
+    "index-unit-output-path" : "/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/StoredMerchant~partial.swiftmodule"
+  },
+  "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-sdk/swift/Sources/VeyraSoftPOS/VeyraSoftPOS.swift" : {
+    "const-values" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS.swiftconstvalues",
+    "dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS.d",
+    "diagnostics" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS.dia",
+    "index-unit-output-path" : "/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS.o",
+    "llvm-bc" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS.bc",
+    "object" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS.o",
+    "swift-dependencies" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS.swiftdeps",
+    "swiftmodule" : "/Users/lekan/Dropbox/projects/avidrone/projects/tokenisation/devices/veyra-ios-sample-app/build/dd/Build/Intermediates.noindex/VeyraSDK.build/Debug-iphonesimulator/VeyraSoftPOS.build/Objects-normal/arm64/VeyraSoftPOS~partial.swiftmodule"
+  }
+}

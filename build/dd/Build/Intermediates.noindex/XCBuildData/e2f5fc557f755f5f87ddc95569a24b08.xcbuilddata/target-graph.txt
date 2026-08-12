@@ -1,0 +1,18 @@
+Target dependency graph (7 targets)
+Target 'VeyraBank' in project 'VeyraBank'
+➜ Explicit dependency on target 'VeyraSDK' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraSoftPOS' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraWallet' in project 'VeyraSDK'
+Target 'VeyraWallet' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraWallet' in project 'VeyraSDK'
+Target 'VeyraSoftPOS' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraSoftPOS' in project 'VeyraSDK'
+Target 'VeyraSDK' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraSDK' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraSoftPOS' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraWallet' in project 'VeyraSDK'
+Target 'VeyraSDK' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraSoftPOS' in project 'VeyraSDK'
+➜ Explicit dependency on target 'VeyraWallet' in project 'VeyraSDK'
+Target 'VeyraWallet' in project 'VeyraSDK' (no dependencies)
+Target 'VeyraSoftPOS' in project 'VeyraSDK' (no dependencies)

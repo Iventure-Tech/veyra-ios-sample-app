@@ -1092,17 +1092,16 @@ let receipts = try await VeyraWallet.shared.tokenisation.receipts(limit: 100)
 let linked   = try await VeyraWallet.shared.tokenisation.receipt(forTransactionHash: hash)
 ```
 
-#### Foreground maintenance — `topUpKeysIfNeeded` / `lukState`
+#### Wallet maintenance — automatic; `topUpKeysIfNeeded` / `lukState`
 
-Wire one scene-phase observer at app level; the SDK does the rest (card status sync, self-healing refreshes, payment-key top-up — the key check also runs automatically before every payment):
+The SDK maintains its own cards — no app wiring required. At `configure`, whenever the app becomes active, and every 15 minutes while the app runs, it syncs each stored card's server status (a suspended card becomes non-payable until polled active again; a deactivated one is removed), self-heals cards the server marks as needing refresh, and tops up the active card's payment keys if they are running low (the key check also runs automatically before every payment). iOS suspends timers while the app is suspended, so nothing runs in the background — the next foreground or launch catches everything up.
+
+`topUpKeysIfNeeded()` remains available as an **optional** immediate nudge — for example behind your own refresh gesture. A call landing while an automatic run is in flight is a no-op:
 
 ```swift
-.onChange(of: scenePhase) { phase in
-    guard phase == .active else { return }
-    Task {
-        try? await VeyraWallet.shared.tokenisation.topUpKeysIfNeeded()
-        try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
-    }
+Task {
+    try? await VeyraWallet.shared.tokenisation.topUpKeysIfNeeded()
+    try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
 }
 ```
 

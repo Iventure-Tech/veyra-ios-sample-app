@@ -73,7 +73,7 @@ In Xcode, open *File → Add Package Dependencies*, paste the repository URL, an
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "1.0.20"),
+    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "1.1.0"),
 ]
 ```
 
@@ -182,9 +182,7 @@ let walletConfig = VeyraWalletConfiguration(
     appVersion: "1.2.0",
     appleTeamID: "YOURTEAMID1",            // your Apple Developer Team ID
     allowedAcquirerIDs: ["ACQ001"],
-    allowedMerchantIDs: ["MERCHANT01"],
-    allowedCountryCodes: ["0566"],
-    allowedMCCs: ["5411"]
+    allowedMerchantIDs: ["MERCHANT01"]
 )
 ```
 
@@ -199,7 +197,9 @@ let walletConfig = VeyraWalletConfiguration(
 | `appleTeamID` | **Mandatory** | Your app's Apple Developer Team ID (e.g. `"ABCDE12345"`). Together with the bundle ID it forms the App Attest app ID (`teamID.bundleID`) that device attestation binds to and the backend verifies — it attests **your** app, so this is your team, not Veyra's. Digitise fails fast if missing. |
 | `bundleID` | Optional | Override for the app's bundle ID (the attestation binding suffix). Normally leave `nil` — auto-detected from `Bundle.main`. |
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
-| `allowedAcquirerIDs` / `allowedMerchantIDs` / `allowedCountryCodes` / `allowedMCCs` | Optional | Provision-context allow-lists. Country codes are ISO 3166-1 numeric, 4-digit zero-padded (`"0566"` Nigeria) — never alpha codes. |
+| `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
+
+> **Breaking change:** `allowedCountryCodes` and `allowedMCCs` have been **removed**. The SDK now declares the provisioning domain itself — country, currency and merchant category code are fixed platform values, identical on iOS, Android and React Native, and can no longer be supplied or overridden. Delete both arguments; `allowedAcquirerIDs` and `allowedMerchantIDs` are unchanged.
 
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 

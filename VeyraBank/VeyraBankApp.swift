@@ -35,8 +35,6 @@ enum SampleConfig {
     // ISO 3166-1 numeric: 0566 = Nigeria.
     static let allowedAcquirerIDs = ["ACQ001"]
     static let allowedMerchantIDs = ["MERCHANT01"]
-    static let allowedCountryCodes = ["0566"]
-    static let allowedMCCs = ["5411"]
 
     static func configureSdks() {
         // Combined app: configure through the umbrella — installs the exclusive-mode arbiter
@@ -58,9 +56,7 @@ enum SampleConfig {
                 tokenRequestorID: tokenRequestorID,
                 appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID
                 allowedAcquirerIDs: allowedAcquirerIDs,
-                allowedMerchantIDs: allowedMerchantIDs,
-                allowedCountryCodes: allowedCountryCodes,
-                allowedMCCs: allowedMCCs
+                allowedMerchantIDs: allowedMerchantIDs
             )
         )
         // Clearing the SoftPOS merchant on uninstall is the SDK's job (the merchant profile

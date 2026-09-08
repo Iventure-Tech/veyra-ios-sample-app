@@ -280,15 +280,16 @@ struct PayView: View {
         lukState = try? await VeyraWallet.shared.tokenisation.lukState(tokenUniqueReference: tokenUniqueReference)
     }
 
-    /// Remove (the visible CTA): best-effort backend deactivate + guaranteed local delete, so a
-    /// card the user no longer wants always leaves the wallet even if the network is down.
+    /// Remove (the visible CTA): backend deactivate, then the on-device wipe. If the backend call
+    /// fails the card stays put and the error surfaces — the user retries. Wiping locally anyway
+    /// would leave a token the backend still holds as live with no card on the device to show it.
     private func remove(_ tokenUniqueReference: String) async {
         pendingRemoval = nil
         actionError = nil
         working = true
         defer { working = false }
         do {
-            try await VeyraWallet.shared.tokenisation.delete(tokenUniqueReference)
+            _ = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
             selectedID = nil
             await reload()
         } catch {

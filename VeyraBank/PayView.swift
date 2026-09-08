@@ -268,7 +268,7 @@ struct PayView: View {
     private func deactivate(_ tokenUniqueReference: String) async {
         actionError = nil
         do {
-            _ = try await VeyraWallet.shared.tokenisation.deactivate(tokenUniqueReference)
+            _ = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
             await reload() // card gone, next one promoted — the Active badge moves
         } catch {
             actionError = String(describing: error)

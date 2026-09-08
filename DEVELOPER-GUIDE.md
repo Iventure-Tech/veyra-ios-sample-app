@@ -824,11 +824,11 @@ try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
 
 **Tap-to-pay is Android-only** — on iOS the wallet pays by QR (Apple restricts card emulation).
 
-#### `tokenisation.deactivate` / `delete` / `wipeAll`
+#### `tokenisation.deactivateToken` / `delete` / `wipeAll`
 
 | Method | Behaviour |
 |---|---|
-| `deactivate(ref)` | Deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active. On failure nothing local changes. |
+| `deactivateToken(ref)` | Deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active. On failure nothing local changes. Named to match Android and React Native, which call the same operation the same way. |
 | `delete(ref)` | The user's "remove card" action: best-effort backend deactivate, then — always — the full local wipe and promotion. |
 | `wipeAll()` | Wipe every card and all SDK-held data from this device (local only). |
 

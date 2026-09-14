@@ -1126,22 +1126,243 @@ Two kinds of surface, marked throughout:
 
 ### Typed errors
 
+The Swift enums are the contract you branch on; the finer `sdkErrorCode` vocabulary carried on a tap
+result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-catalogue) below.
+
 | Error | Case | When | What to do |
 |---|---|---|---|
 | `VeyraWalletError` | `.notConfigured` | Any call before `VeyraWallet.configure(_:)` | Configure at launch. |
-| | `.authenticationFailed(message)` | Face ID / Touch ID / passcode failed or was cancelled — **no payment was attempted**, nothing recorded | Stay on the confirm screen; let the user retry. |
+| | `.authenticationCancelled(message)` | The customer dismissed the Face ID / Touch ID / passcode sheet the SDK raised — **no payment was attempted**, nothing was sent | Stay on the confirm screen and let them start the payment again. |
+| | `.authenticationFailed(message)` | Authentication was attempted and did not succeed — **no payment was attempted**, nothing recorded | Stay on the confirm screen; offer a retry. |
+| | `.authenticationUnavailable(message)` | This device can perform no authentication at all: no enrolled biometry **and** no passcode | A retry cannot help — send the customer to Settings to set a passcode. |
 | | `.onlineRequired(message)` | The card has no usable payment keys — refused **before** any payment/QR is built | Prompt the user to connect to the internet. Pre-empt it: the card already shows `requiresOnline == true` — grey it out. Clears itself after the SDK's automatic refresh. |
 | | `.amountExceedsCardLimit(message)` | The amount is larger than this card can carry in one payment — refused **before** any payment/QR is built | Offer a smaller amount or another card. Unlike `.onlineRequired` this does **not** clear by going online: the per-payment limit is provisioned with the card. |
-
-Both refusals are also available as an observer — `VeyraWallet.shared.tokenisation.observePaymentRefusals(onRequireOnline:onAmountExceedsCardLimit:)`, with `stopObservingPaymentRefusals()` — for hosts that would rather handle them in one place than at every call site. **Porting from Android? The registration shape differs.** On Android the two refusals are **per token**: you hand them to the card you are arming, so different cards can carry different handlers simultaneously. On iOS it is a **single SDK-wide registration** — observing again replaces the previous observer — and the callback's `tokenUniqueReference` tells you which card it was about. Nothing is lost, but Android code that assumes "this handler only ever hears about *this* card" must start filtering on `tokenUniqueReference` here. It is the same last-registration-wins rule the `transactions` observers follow.
 | | `.tokenNotActive(message)` | The card's server-side status is not active (e.g. suspended by the issuer) — **no payment was attempted** | Tell the user the card is suspended/inactive. Don't retry locally — payments resume automatically once a status sync sees the card active again. |
 | | `.noNetworkConnection(message)` | **Any** wallet backend call — get banks, verify account, digitise, request activation code, activate, check token active, get token status — on a device with no working internet connection | Ask the user to connect and try again. Nothing was sent, so nothing needs undoing. |
+| | `.unrecognisedResponseCode(message)` | Digitisation answered with a response code this SDK version does not recognise, so the token was **discarded** — nothing provisioned, no card added, even when the response carried complete token data | Show the message and offer a retry; update the Veyra SDK if it persists. `message` quotes the raw code for support. A token whose terms the SDK cannot interpret is never installed on a guess. |
 | | `.requestFailed(message)` | Everything else (network, backend, invalid input) | Show `error.localizedDescription` — every case carries its underlying message. |
 | `VeyraSoftPOSError` | `.notConfigured` | Any call before `VeyraSoftPOS.configure(_:)` | Configure at launch. |
 | | `.tapRefused(message)` | Arming the tap reader was refused — the wallet's payment is mid-flight (combined apps) | "Finish or cancel the current payment first." Never occurs in a SoftPOS-only app. |
 | | `.noNetworkConnection(message)` | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — on a device with no working internet connection | Ask the merchant to connect and try again. Nothing reached the gateway; no transaction was recorded. |
 | | `.requestFailed(message)` | Backend/network failure | Show the message; offer retry. |
 | `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(softpos:wallet:)` | Configure at launch. |
+
+Both refusals are also available as an observer — `VeyraWallet.shared.tokenisation.observePaymentRefusals(onRequireOnline:onAmountExceedsCardLimit:)`, with `stopObservingPaymentRefusals()` — for hosts that would rather handle them in one place than at every call site. **Porting from Android? The registration shape differs.** On Android the two refusals are **per token**: you hand them to the card you are arming, so different cards can carry different handlers simultaneously. On iOS it is a **single SDK-wide registration** — observing again replaces the previous observer — and the callback's `tokenUniqueReference` tells you which card it was about. Nothing is lost, but Android code that assumes "this handler only ever hears about *this* card" must start filtering on `tokenUniqueReference` here. It is the same last-registration-wins rule the `transactions` observers follow.
+
+### SDK error codes — the `sdkErrorCode` catalogue
+
+The Swift error enums above are what you `catch`. Underneath them the SDK has a second, finer
+vocabulary — the same one the Android SDK exposes as `SdkErrorCode` — and it reaches Swift as a
+**string** in one place: `TapPaymentResult.sdkErrorCode`.
+
+```swift
+if let code = result.sdkErrorCode {
+    // Not a payment outcome: no response code, no status, nothing recorded.
+    // `code` says what the SDK (not the issuer) could not do.
+}
+```
+
+**The rule the whole catalogue obeys: an SDK error is never a payment outcome.** Approvals, declines
+and unresolved payments arrive as `status` + the response code; nothing here is one. `sdkErrorCode`
+is `nil` for every real outcome, including a decline — so check it **before** you read `status`.
+
+**A code you don't recognise is handled by its group, never by name.** Values are added as new
+conditions become observable. Show `errorMessage`, log the code for support, and never treat an
+unfamiliar one as a decline.
+
+#### 1. The device could not send anything
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `NO_NETWORK_CONNECTION` | The merchant's device has no working internet connection — DNS never resolved, or there is no usable network. Nothing reached the gateway | "Connect to the internet and try again." Nothing was charged, nothing is polling, nothing to reconcile. Not the same as `91` (reached the network, refused) or the wallet's `.onlineRequired` (a *card* state). |
+| `MISSING_MANDATORY_CONFIG` | A required configuration value is absent — environment, client credentials, terminal or merchant id | An integration bug, not a user-facing error. Fix `VeyraSoftPOSConfiguration`, or register the merchant (which supplies terminal/merchant ids). |
+
+#### 2. Card-read failures — "unknown card, tap again"
+
+These mean the **tapped card** could not be turned into an authorizable payment, at or before
+cryptogram generation. **You normally never see them as a code:** they arrive as the
+`.unsupportedTarget` / `.cardContactLost` tap events, the reader stays armed, and no result is
+delivered.
+
+| Code | What went wrong on the card |
+|---|---|
+| `NO_NFC_TAG` | No usable tag in the field (or a non-EMV target). |
+| `NFC_CONNECTION_FAILED` | The ISO-DEP connection could not be opened or was lost immediately. |
+| `APPLICATION_SELECTION_FAILED` | No supported payment application on the target — typically a foreign card scheme, or another phone tapped by mistake. |
+| `NO_COMBINATION_RESULT` / `NO_AID_SELECTED` | No AID / kernel combination was selected, so there is nothing to transact with. |
+| `NO_GPO_RESULT` / `GPO_FAILED` | `GET PROCESSING OPTIONS` failed or returned nothing usable. |
+| `READ_RECORDS_FAILED` | The card's application records could not be read. |
+| `PROCESSING_RESTRICTIONS_FAILED` | Application version / usage restrictions refused the card for this transaction. |
+| `CID_VALIDATION_FAILED` / `NO_FINAL_CID` | The cryptogram information byte was missing or not what the flow requires. |
+| `GENERATE_AC_FAILED` / `NO_CRYPTOGRAM_RESULT` | The card did not return a usable cryptogram. |
+| `CDA_FAILED_TC` / `CDA_FAILED_AAC` | Combined data authentication failed on the card's approval / decline cryptogram. |
+| `NO_TTQ_IN_PDOL` | The card's PDOL does not ask for the terminal transaction qualifiers, so it is not a card this kernel can transact. |
+| `TC_NOT_SUPPORTED` | The card approved **offline** (returned a TC). This product authorises online only. |
+
+**Give the merchant one message, not twelve** — "Card not supported — try another card" — and keep
+the waiting screen up. Log the code for support; never end the sale on one.
+
+#### 3. Online-leg failures — you receive a response triple, not a code
+
+When a payment went out and got no usable answer, the SDK originates the same triple every other hop
+in the chain uses, and `sdkErrorCode` stays `nil`. The internal names are listed because support logs
+quote them:
+
+| Internal code | Reported as | Terminal? | What to do |
+|---|---|---|---|
+| `ISSUER_CONNECTION_REFUSED` | `91` / `FAILED` / `ISSUER_SWITCH_NOT_AVAILABLE` | **Yes** | The socket was refused, so the request provably never arrived. Nothing happened — a retry is safe. The merchant's connection is *not* the problem. |
+| `ISSUER_CONNECTION_TIMEOUT`, `ISSUER_RESPONSE_TIMEOUT`, `ISSUER_NETWORK_ERROR` | `68` / `PENDING` / `NO_RESPONSE_RECEIVED` | No | Sent, no reply. **Never re-charge.** Show "processing"; the SDK stores the transaction and polls it to a final status. |
+| `ISSUER_HTTP_ERROR`, `ISSUER_RESPONSE_PARSE_ERROR`, `ISSUER_BAD_RESPONSE_DATA` | `06` / `PENDING` / `UPSTREAM_ERROR` | No | Sent, answer unusable (any HTTP error, including a `4xx`, is treated this way — it comes from in front of the gateway and says nothing about the payment). Same handling as `68`. |
+
+A **connect timeout is deliberately not `91`**: the request may have been delivered and only the
+reply lost. Only a refused socket is terminal.
+
+#### 4. SDK-internal failures
+
+The SDK broke rather than the payment. They surface with **no** response code and no status — the SDK
+may report what it saw about the network and the gateway, but never reports *itself* as a payment
+outcome, and it never mints `96`.
+
+| Code | Meaning |
+|---|---|
+| `PAYMENT_REQUEST_FAILED` | The payment request could not be built or dispatched. |
+| `ONLINE_PROCESSING_FAILED` | The online leg failed inside the kernel. |
+| `NO_PAYMENT_PROCESSING_SERVICE` | No payment processing service was wired into the kernel run. |
+| `PAYMENT_PROCESSING_ERROR` | An unclassified failure while processing the payment. |
+| `TRANSACTION_ERROR` / `TRANSACTION_EXCEPTION` | The transaction orchestrator / kernel threw. |
+| `TRANSACTION_DATA_NOT_SET` | A payment was progressed with no transaction data prepared. |
+| `COMPLETION_FAILED` | The kernel's completion step failed after the cryptogram. |
+| `STATE_MACHINE_MAX_ITERATIONS_EXCEEDED`, `STATE_MACHINE_CYCLE_DETECTED`, `STATE_MACHINE_SELF_LOOP_DETECTED`, `STATE_MACHINE_UNEXPECTED_END`, `NO_HANDLER_FOUND`, `STATE_HANDLER_EXCEPTION`, `STATE_HANDLER_FAILED` | The EMV kernel's state machine could not complete. Report the code; these are SDK defects, not merchant mistakes. |
+
+**Handling depends on one question: had the request gone out?** A failure *before* dispatch sent
+nothing — fix and retry. A failure *after* dispatch may sit over a payment that completed, so the SDK
+stores the transaction and polls it: show "processing", read the row, and **do not re-charge**. You
+never have to work that out yourself — look for a row under this payment's `reference`
+(`transactions.status(forReference:)` / the transactions list) before offering a retry.
+
+#### 5. Merchant onboarding and authentication failures
+
+These reach you as `VeyraSoftPOSError.requestFailed(message:)`; the names below are what a support
+log shows underneath.
+
+| Code | Raised when | What to do |
+|---|---|---|
+| `MERCHANT_REGISTRATION_NETWORK_ERROR` | Registration could not reach the backend | Retry when connected; nothing was created. |
+| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | A `401`/`403` here is almost always wrong client credentials; a `4xx` on registration means the profile was refused — show the message. |
+| `MERCHANT_REGISTRATION_PARSE_ERROR` | The registration response could not be parsed | Retry; if it persists the merchant may in fact be registered — refresh the status before registering again. |
+| `ISSUER_NETWORK_ERROR` | The OAuth token fetch failed at transport level | Retry when connected. The authenticated call never started. |
+
+#### What differs from Android
+
+The vocabulary is shared, the *surfaces* are not, and two differences matter when porting:
+
+- **Android's pre-dispatch gates have no iOS equivalent on the tap rail.** `INVALID_REQUEST`,
+  `PAYMENT_CANCELLED`, `TRANSACTION_IN_PROGRESS`, `MERCHANT_NOT_ACTIVE`,
+  `MERCHANT_PROFILE_INCOMPLETE` and `NFC_MODE_REFUSED` are produced by the Android tap rail's own
+  checks before it dispatches; on iOS the equivalent refusals surface as thrown
+  `VeyraSoftPOSError` cases (`.notConfigured`, `.tapRefused`, `.requestFailed`). Gate your own
+  get-paid entry on the merchant being registered and active, as the guide's merchant section
+  describes.
+- **`sdkErrorCode` is a `String?` here and an enum on Android.** Compare with string literals, and
+  keep a default branch — an unrecognised value is not a decline.
+
+### Payment response codes — the full vocabulary
+
+Every payment outcome, on every rail, is a **triple**:
+
+| Field | What it is | How to use it |
+|---|---|---|
+| `responseCode` | The ISO-8583-style wire literal (`"00"`, `"51"`, `"96"`…) | Display on receipts, quote in support. **Never branch on it.** |
+| `responseStatus` | `APPROVED` / `DECLINED` / `FAILED` / `PENDING` | **This is what you branch on.** Only the first three are final. |
+| `responseStatusReason` | The named cause (`INSUFFICIENT_FUNDS`, `QR_EXPIRED`…) — a plain `String`, deliberately not an enum | Display and log. Match it for bespoke copy, but always keep a default. |
+
+The same vocabulary is used at every hop — contactless tap, both QR rails, the settlement leg and
+every status poll — so an outcome reads identically wherever you meet it. One code, one reason, one
+status:
+
+| Code | Reason | Status | Meaning | What to do |
+|---|---|---|---|---|
+| `"00"` | `APPROVED` | `APPROVED` | The payment was approved | Success screen + receipt. |
+| `"05"` | `DO_NOT_HONOR` | `DECLINED` | Refused without a more specific cause | Show the decline; try another card. |
+| `"51"` | `INSUFFICIENT_FUNDS` | `DECLINED` | Not enough money on the funding account | Show the reason; offer another card. |
+| `"54"` | `EXPIRED_CARD_OR_TOKEN` | `DECLINED` | The card or token has expired | The customer must renew or re-add the card. |
+| `"14"` | `INVALID_TOKEN` | `DECLINED` | The token is not one the issuer recognises or will honour | Terminal for this card — re-add it or contact the issuer. |
+| `"58"` | `DOMAIN_RESTRICTION_FAILED` | `DECLINED` | The token is not permitted in this domain (rail / entry mode / merchant category) | Not retryable on this rail — offer another rail or another card. |
+| `"61"` | `LIMIT_EXCEEDED` | `DECLINED` | The amount breaches a per-payment limit | Offer a smaller amount or another card. |
+| `"65"` | `VELOCITY_LIMIT_EXCEEDED` | `DECLINED` | Too many / too much in the rolling window | Wait or use another card; retrying now fails identically. |
+| `"63"` | `SUSPECTED_FRAUD` | `DECLINED` | Refused on fraud grounds | Terminal — do not retry; send the customer to their bank. |
+| `"12"` | `QR_EXPIRED` | `DECLINED` | The payment QR had lapsed by the time it was presented or charged | Ask for a **fresh** code and scan again — nothing is wrong with the card. |
+| `"13"` | `AMOUNT_MISMATCH` | `DECLINED` | The charged amount or currency does not match the one bound into the QR | Re-scan the customer's current code; never re-key an amount. |
+| `"09"` | `TRANSACTION_IN_PROCESS` | `PENDING` | Accepted, still settling | Keep polling on the normal schedule. |
+| `"09"` | `TRANSACTION_IN_PROCESS_ESCALATED` | `PENDING` | Automated reconciliation stopped; a human will settle it | **Stop any tight loop.** Show "we're looking into this" and re-check lazily. It still resolves. |
+| `"68"` | `NO_RESPONSE_RECEIVED` | `PENDING` | Sent, no reply arrived | **Never re-charge.** Show "processing"; the SDK polls it to a final status. |
+| `"06"` | `UPSTREAM_ERROR` | `PENDING` | The hop we called failed or answered unintelligibly | Same as `68` — unresolved, not refused. |
+| `"96"` | `SYSTEM_MALFUNCTION` | `PENDING` | A service threw while processing; the outcome is ambiguous | Same as `68`. It may yet settle — never report it as a decline. |
+| `"91"` | `ISSUER_SWITCH_NOT_AVAILABLE` | `FAILED` | The connection never opened — provably nothing was sent | Safe to retry. The merchant's own connection is not the problem. |
+| `"25"` | `UNABLE_TO_LOCATE_RECORD` | `FAILED` | The gateway has no such transaction — it never arrived | Terminal and safe: the payment did not happen. Take it again. |
+| `"07"` | `ACCOUNT_VALIDATION_FAILED` | `FAILED` | The destination (settlement) account was refused by the bank's own validation | Nothing was transferred. Fix the settlement account on the merchant profile. |
+| `"21"` | `NAME_ENQUIRY_FAILED` | `FAILED` | The pre-transfer name enquiry itself failed, so the transfer was never dispatched | Nothing was transferred — retry; if it persists, check the settlement account details. |
+
+Three rules that decide how you handle any of them — including a code this table does not list:
+
+1. **`PENDING` is not a failure.** `06`, `09`, `68` and `96` all mean "ask again". Re-charging one of
+   these risks charging the customer twice.
+2. **`FAILED` means nothing happened.** `91`, `25`, `07` and `21` are terminal *and* safe to retry —
+   no money moved.
+3. **`DECLINED` is terminal and money did not move either** — but somebody with authority refused, so
+   a retry of the same payment fails the same way. Change something (card, amount, rail) or stop.
+
+**An unknown code is not a decline.** The backend gains values faster than an SDK ships. Read the
+status; if that is absent or unrecognised too, treat the payment as unresolved — poll it — rather
+than reporting a refusal.
+
+### Every call that returns a response code or status
+
+`responseCode` / `responseStatus` are **not** on every call: registration, QR creation, scanning and
+card reads have their own vocabularies (or throw). This is the complete itemisation of what each SDK
+call can hand you.
+
+#### SoftPOS — accepting payments
+
+| Call | Carries the outcome in | Statuses it can return | Codes it can return |
+|---|---|---|---|
+| `merchant.tap.session(...)` → `.result(TapPaymentResult)` (**contactless tap**) | `result.status`, `result.sdkErrorCode`, `result.errorMessage`, `result.reference` | `"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` | **The tap result itself carries no response code** — read the code from the recorded row: `transactions.refreshStatus(reference:)`, `transactions.history()` or `transactions.status(...)`. `sdkErrorCode` set means the SDK, not the payment, failed |
+| `merchant.tap.session(...)` → `.ended(outcome:)` | `outcome` | `"CANCELLED"` / `"TIMEOUT"` / `"ERROR"` / `"UNAVAILABLE"` | — The reader session ended **without** a card; nothing was attempted. Recreate the session |
+| `payments.chargeCustomerQr(_:merchantOrderID:)` (**customer-presented QR**) | `CustomerQrChargeOutcome.approved`, `.responseCode`, `.reference` | — (`approved` is exactly `responseCode == "00"`) | The full vocabulary, and this rail is where `12` (**stale QR — ask the customer to regenerate**) and `13` (amount/currency not the one bound in the QR) actually occur. For the **stated status and reason**, read the recorded row with `transactions.refreshStatus(reference:)`. A transport failure throws instead |
+| `payments.inspectCustomerQr(_:)` | — (throws) | — | — Not a payment call: a throw means "not a payment QR". Show a hint and stay armed for another scan |
+| `payments.createContext(...)` (**merchant-presented QR**) | `PaymentContextQR` — `txRef`, `mpmPayload`, `expiry`, `kid` | — | — Creating a QR is not a payment. Failures throw; the *payment* outcome arrives on the status poll below |
+| `payments.contextStatus(txRef:)` (**merchant-presented QR outcome**) | `PaymentContextState.state`, `.responseCode`, `.isSettled`, `.isApproved` | `state`: `"PENDING"` / `"IN_FLIGHT"` / `"APPROVED"` / `"DECLINED"` / `"EXPIRED"` (the *context's* lifecycle) | The full vocabulary once a wallet has pushed; `nil` while the QR is still unpaid. `"EXPIRED"` carries no code — the QR lapsed unpaid and is never recorded |
+| `transactions.status(...)` | `TransactionStatus.responseCode`, `.merchantStatus` | — | The gateway's current code for that reference, including `"25"` when it holds no such transaction (`amount` is then `nil`) |
+| `transactions.history(limit:)` / `refreshStatus(reference:)` | `MerchantTransaction.status`, `.responseCode`, `.responseStatusReason` | `"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` | The full vocabulary, stored per sale (`rail` tells you which of `"TAP"` / `"QR_MPM"` / `"QR_CPM"` produced it) |
+| `transactions.onTransactionResolved { }` | `TransactionResolution.status`, `.responseCode`, `.reason` | `"APPROVED"` / `"DECLINED"` / `"FAILED"` — **never** `"PENDING"` (it only fires on resolution) | The settled outcome's code |
+| `transactions.creditConfirmation(...)` / `refreshCreditConfirmation(reference:)` / `onCreditConfirmation { }` | `CreditConfirmation.status` / `SaleCreditConfirmation.status` | `"RECEIVED"` (funds landed in the merchant's account) or `"UNABLE_TO_CONFIRM"` (the 30-day window closed with no answer) | — A settlement fact, **not** a payment outcome: it never contradicts the payment's own status |
+| `merchant.register(_:)` / `status(merchantID:)` / `activate` / `deactivate` / `update` | `MerchantStatus.status`, `MerchantStatusChange.status` | `"ACTIVE"` / `"INACTIVE"` / `"SUSPENDED"` / `"DEACTIVATED"` | — Not a payment vocabulary. Gate your get-paid entry on `"ACTIVE"` |
+
+#### Wallet — making payments
+
+| Call | Carries the outcome in | Statuses it can return | Codes it can return |
+|---|---|---|---|
+| `tokenisation.payScannedContext(_:)` (**scan-to-pay, merchant QR**) | `PaymentOutcome.responseStatus`, `.responseCode`, `.responseStatusReason`, `.approved`, `.message` | `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"` (or `nil` — treat as unresolved) | The full vocabulary; `12` when the merchant's QR lapsed before the push landed, `13` on an amount/currency mismatch. Card-side refusals never reach here — they are thrown as `VeyraWalletError` before anything is sent |
+| `tokenisation.showQrToPay(amountMinorUnits:onExpired:)` (**show-to-pay, customer QR**) | `PaymentQr` — the payload to display | — | — The merchant submits the payment, so the outcome arrives later on the history row (below) via the SDK's reconciliation. Pre-payment refusals are thrown errors, not codes |
+| `tokenisation.inspectScannedQr(_:)` | `ScanInspection` | `Verified` / `Rejected` | **A different vocabulary:** `MALFORMED`, `MISSING_SIGNATURE`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `EXPIRED`. Every rejection ends the flow — no payment was attempted |
+| `tokenisation.transactionHistory(...)` / `refreshTransactionStatus(transactionHash:)` / `reconcilePendingTransactions()` | `TransactionSummary.authorizationStatus`, `.responseCode`, `.responseStatusReason` | `"PENDING"` (still polling) / `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `nil` (legacy row — indeterminate) | The full vocabulary. Poll answers are `09`, `09` + escalated, `25`, or the settled outcome |
+| `tokenisation.observeTransactionResolved { }` | `WalletTransactionResolution.status`, `.responseCode` | `"APPROVED"` / `"DECLINED"` / `"FAILED"` | The settled outcome's code (keyed on `transactionHash`, not a merchant reference) |
+| `tokenisation.recentActivity(tokenUniqueReference:)` | `TokenActivity.status` | `"APPROVED"` / `"DECLINED"` | — A condensed per-card activity view; read `transactionHistory` for the full triple |
+| `tokenisation.digitise(...)` / `verifyAccount(...)` | `.responseCode`, `.responseStatus`, `.responseStatusReason` on `DigitiseResult` / `VerifyAccountResponse` | `responseStatus`: `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"` | **A different vocabulary:** `"APPROVED"`, `"APPROVE_REQUIRE_AUTH"`, `"DECLINED"` — and anything else means the token is **discarded** (`VeyraWalletError.unrecognisedResponseCode`). The issuer's cause arrives in `message` — see [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) |
+| `tokenisation.requestActivationCode(...)` / `activate(...)` | `ActivationCodeResponse` / `ActivateResponse` — `.status`, `.failureCode`, `.failureCodeRaw`, `.attemptsRemaining`, `.recommendDelete` | `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** the typed [`failureCode`](#activation--status--failurecode) (`.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.codeRequestRateLimited`, `.noPendingActivation`, `.activationLocked`, `.tokenNotFound`, `.tokenNotActivatable`, `.invalidRequest`, `.activationFailed`, `.unknown(raw:)`) |
+| `tokenisation.tokens()` / `tokenStatus(...)` / `deactivateToken(...)` / `observeTokenLifecycle { }` | `StoredCard.status` / `.isActive` / `.requiresOnline`, `TokenStatusUpdateResponse.status`, `TokenStatusChange.canPay` | `"ACTIVE"` / `"PENDING_ACTIVATION"` / `"SUSPENDED"` / `"EXPIRED"` / `"DEACTIVATED"` / `"UNKNOWN"` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
+
+**Reading the table:** a dash in the code column means that call has no response code *by design* —
+minting one would assert that a payment was attempted and something on the wire answered. Where a
+call refuses before anything is sent (card out of keys, over its limit, not active, no network,
+authentication dismissed), you get a **typed `VeyraWalletError` / `VeyraSoftPOSError`**, not a code —
+see [Typed errors](#typed-errors) and [SDK error codes](#sdk-error-codes--the-sdkerrorcode-catalogue).
+
+**Where iOS gives you the code but not the stated status.** Two merchant surfaces —
+`CustomerQrChargeOutcome` (customer-QR charge) and `PaymentContextState` (merchant-QR poll) — carry
+`responseCode` without `responseStatus` / `responseStatusReason`. Read the recorded row
+(`transactions.refreshStatus(reference:)` → `MerchantTransaction`) when you need the stated status and
+cause; the row carries the full triple on every rail.
 
 ### Tap acceptance — `TapPaymentResult.status`
 
@@ -1168,8 +1389,8 @@ The response codes underneath are shared on the wire across rails; where a code 
 | `"06"` | Failed before reaching the issuer — validation, cancellation, merchant not active, wrong mode, read failure after the online boundary | Yes (no money moved) | Fix the input/config and re-initiate; `message` says which check failed. |
 | `"68"` (was `"99"`) | Pending — sent, no reply received (timeout/network) | Outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
 | `"91"` | Never connected — the request provably never left | **`FAILED`** — nothing happened, retry is safe | Same — poll, don't retry-charge. |
-| `"12"` / `"14"` / `"51"` / `"54"` | Invalid transaction / invalid card / insufficient funds / expired card | Yes | Hard declines — show the reason, try another card. |
-| `"96"` | System malfunction — **ambiguous**: the payment may have failed *or* succeeded with the response lost | Yes, but unresolved | Don't assume failure: poll the transaction status briefly before telling the merchant it failed. |
+| `"51"` / `"54"` / `"14"` / `"58"` / `"61"` / `"63"` / `"65"` | Insufficient funds / expired card or token / invalid token / domain restriction / limit exceeded / suspected fraud / velocity limit | Yes | Hard declines — show the named reason (`responseStatusReason` on the stored row) and act on it; see [the full vocabulary](#payment-response-codes--the-full-vocabulary). |
+| `"96"` | System malfunction — **ambiguous**: the payment may have failed *or* succeeded with the response lost | No — `PENDING` | Don't assume failure: the SDK polls it, and it may still settle. Never show it as a decline. |
 
 ### QR context lifecycle — `contextStatus().state`
 
@@ -1182,11 +1403,16 @@ The response codes underneath are shared on the wire across rails; where a code 
 
 ### Rail response codes (all QR + settlement legs)
 
+Every rail draws on [the one vocabulary](#payment-response-codes--the-full-vocabulary) above; these
+are the values you meet most often on the QR and settlement legs:
+
 | Code | Meaning | What to do |
 |---|---|---|
 | `"00"` | Approved | `approved` convenience fields on every outcome type are exactly this check. |
-| `"05"` | Definitive decline (issuer/token provider refused — includes stale/tampered customer QRs, restriction and limit breaches) | Show decline. On a customer-QR charge, a code that sat on screen may simply be stale — ask the customer to regenerate. |
-| `"96"` | System error — **outcome ambiguous** (may settle later via reconciliation) | Keep polling briefly (merchant: `contextStatus` / `transactions.status`; wallet: `reconcilePendingTransactions`) before declaring failure. |
+| `"05"` | Definitive decline with no more specific cause | Show decline. Where the gateway knows more you get the specific code instead (`51`, `58`, `61`, `65`…) — read `responseStatusReason` on the stored row. |
+| `"12"` | The QR had expired | Ask for a fresh code and scan again. The card is fine. |
+| `"13"` | The amount or currency does not match the one bound inside the QR | Re-scan the customer's current code; never re-key the amount. |
+| `"96"` | System error — **outcome ambiguous** (`PENDING`, may settle later via reconciliation) | Keep polling (merchant: `contextStatus` / `transactions.status`; wallet: `reconcilePendingTransactions`) before declaring failure. |
 | `null` | Not settled yet | Keep polling. |
 
 ### Digitisation & eligibility — `responseCode`
@@ -1197,10 +1423,136 @@ Three values, and a rule for everything else, on both eligibility and digitise r
 |---|---|---|
 | `"APPROVED"` | Eligible / provisioned and active | Card is ready — show it in the wallet. |
 | `"APPROVE_REQUIRE_AUTH"` | Provisioned, needs activation | Run the activation flow with the returned `activationMethods`. |
-| `"DECLINED"` | Refused | Show `message` (it carries the reason — e.g. the account falls outside your configured provision-context allow-lists). Flow ends. |
+| `"DECLINED"` | Refused | Show `message` — it names the cause. Every cause the issuer can state, and the exact text you receive for it, is in [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) below. Flow ends. |
 | Any other code (or none) | Not recognised by this SDK version | The token is **discarded** — nothing provisioned, no card added, even if the response carried full token data. Show the error and offer a retry; update the SDK if it persists. |
 
 The last row is a **throw**, not a returned code: `digitise` fails with `VeyraWalletError.unrecognisedResponseCode(message:)`, whose message quotes the raw code. A token whose terms the SDK cannot interpret is never installed on a guess — so the wallet is left exactly as it was, and the SDK asks the backend to release the token it minted.
+
+### Add a card (tokenisation) — every code, status and cause
+
+The add-a-card calls (`tokenisation.digitise`, `tokenisation.verifyAccount`, activation, token status) answer with
+**three separate vocabularies**. Keeping them apart is the whole trick:
+
+| What you read | Values | What it tells you |
+|---|---|---|
+| `responseCode` on `DigitiseResult` / `VerifyAccountResponse` | `"APPROVED"` / `"APPROVE_REQUIRE_AUTH"` / `"DECLINED"` (anything else ⇒ the token is **discarded**) | The **issuer's decision** about this account and device. |
+| `responseStatus` | `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"` | What the **call** did. `DECLINED` = it ran and the answer is no; `FAILED` = it could not run, so nothing was decided about the account. |
+| `responseStatusReason` | The symbolic cause — `ACCOUNT_NAME_MISMATCH`, `ACCOUNT_BLOCKED`, `INVALID_ACCOUNT_NUMBER`, … | **Why** — and the field to branch on. |
+| `message` | Free text | The same cause, worded for a human. Display it; never match on it. |
+| The thrown `VeyraWalletError` | `.requestFailed` / `.noNetworkConnection` / `.unrecognisedResponseCode` | Whether the **SDK** could complete the call at all. |
+
+> **`responseStatus` and `responseStatusReason` arrive in 1.2.4.** Against an older SDK — or an
+> older backend — they read as absent, and the cause is only in `message`. Absent means "no cause
+> stated", never a specific one.
+
+**The decision and the call are different questions.** `DECLINED` means the call worked and the
+answer is no — show the reason and end the flow. A call-level failure means nothing was decided:
+fix it and try again.
+
+#### Why a card was declined, or needs step-up — the issuer's causes
+
+The issuer states a symbolic cause for every non-approval, and you receive it as
+**`responseStatusReason`** — the field to branch on. `message` is the same cause worded for a human: display that,
+but never match on it, because the wording can change while the code does not.
+
+The tables below are the causes the issuer states today. **Keep a default branch**: the vocabulary
+grows without an SDK release, and a cause added after your build reaches you unchanged rather than
+being flattened into something familiar.
+
+**Identity did not match — these ask for step-up rather than refusing** (`APPROVE_REQUIRE_AUTH`,
+so run the activation flow with the returned `activationMethods`):
+
+| Cause | The `message` you receive |
+|---|---|
+| `ACCOUNT_NAME_MISMATCH` | "Account name does not match; step-up authentication required" — on the earlier availability check it is the plain "Account name does not match" |
+| `BVN_MISMATCH` | "BVN does not match; step-up authentication required" |
+| `ACCOUNT_NOT_LINKED_TO_BVN` | "Account is not linked to the supplied BVN; step-up authentication required" |
+| `ACCOUNT_ADDRESS_MISMATCH` | "Account address does not match; step-up authentication required" |
+
+A mismatch usually means the details your app sent do not match the bank's record. The account
+holder name, address and BVN you pass are compared with core banking, so check what you collected
+before telling the customer their bank has a problem.
+
+**The account cannot be tokenised** (`DECLINED` — the flow ends):
+
+| Cause | The `message` you receive |
+|---|---|
+| `ACCOUNT_TYPE_NOT_ALLOWED` | "Account type is not permitted for token digitisation" |
+| `JOINT_ACCOUNT_NOT_ALLOWED` | "Joint accounts are not permitted for token digitisation" |
+| `ACCOUNT_INACTIVE` | "Account is not active" |
+| `ACCOUNT_BLOCKED` | "Account is blocked" |
+| `ACCOUNT_CLOSED` | "Account is closed" |
+| `ACCOUNT_DND` | "Account has a Do Not Digitise flag" |
+| `ACCOUNT_DNC` | "Account has a Do Not Contact flag" |
+| `UNKNOWN_ACCOUNT` | "Unable to retrieve account details" |
+
+**This device, wallet or product is not permitted** (`DECLINED` — retrying the same way cannot help):
+
+| Cause | The `message` you receive |
+|---|---|
+| `DEVICE_NOT_ALLOWED` | "Device type is not permitted" |
+| `DEVICE_REGION_NOT_ALLOWED` | "Device region is not permitted" |
+| `WALLET_NOT_ALLOWED` | "Wallet is not permitted" |
+| `TOKEN_REQUESTOR_NOT_ALLOWED` | "Token requestor is not permitted" |
+| `STORAGE_TECH_NOT_ALLOWED` | "Storage technology is not permitted" |
+| `ACCOUNT_SOURCE_NOT_ALLOWED` | "Account number source is not permitted" |
+| `PAYMENT_APPLICATION_NOT_ALLOWED` | "Payment application is not permitted" |
+| `TOKEN_TYPE_NOT_ALLOWED` | "Token type is not permitted" |
+| `CUSTOMER_ID_NOT_ALLOWED` | "Customer identifier is not permitted" |
+| `MAX_ACTIVE_TOKENS_EXCEEDED` | "Maximum number of active tokens has been exceeded" — the customer must remove a card before adding another |
+| `NO_VALID_ACTIVATION_METHOD` | "No valid activation method is available" — the issuer has no way to reach this customer for step-up |
+
+**Risk refused it** (`DECLINED`):
+
+| Cause | The `message` you receive |
+|---|---|
+| `RISK_SCORE_BELOW_THRESHOLD` | "Risk score exceeds the configured threshold" |
+| `WALLET_PROVIDER_DEVICE_SCORE_TOO_LOW` | "Wallet provider device score is too low" |
+| `WALLET_PROVIDER_ACCOUNT_SCORE_TOO_LOW` | "Wallet provider account score is too low" |
+| `WALLET_PROVIDER_ACCOUNT_NOT_RECOGNISED` | "Wallet provider account could not be recognised" |
+
+The last three are scored partly from what **your app** supplies — the device and account trust
+scores, the recommendation and its reasons, and the wallet account identifier (pass the account's
+registered email or phone, never an internal id: the issuer hashes it and compares it with its own
+record, so a value the bank does not hold matches nothing and costs the digitisation its identity
+signal).
+
+Anything else — including a cause added after your build — arrives as "Account is not eligible for
+tokenisation" / "Account is not available for tokenisation". Show the message; never assume a
+specific cause from a `DECLINED` alone.
+
+#### Call-level failures — `response_status` and `response_status_reason`
+
+Every tokenisation endpoint answers **HTTP 200** and states a call-level failure inside the body,
+using the same field names a payment uses minus the ISO code:
+
+- **`response_status`** — `APPROVED` (the call did what was asked) / `DECLINED` (a stated refusal by
+  an authority) / `FAILED` (the call could not be performed) / `PENDING` (not yet known, ask again).
+- **`response_status_reason`** — the symbolic cause on `FAILED`. A plain string, so a value added
+  later can never fail to parse.
+
+The values you can see on the tokenisation surfaces:
+
+| `response_status_reason` | Raised when |
+|---|---|
+| `REQUEST_BODY_REQUIRED` | The request body was missing (digitise, eligibility, token refresh) |
+| `INVALID_REQUEST` | The payload is malformed or a required field is absent |
+| `INVALID_ACCOUNT_NUMBER` | The account number on a bank/account lookup is not a valid NUBAN |
+| `NOT_FOUND` / `TOKEN_NOT_FOUND` | No such record / no such token behind the reference |
+| `AUTHENTICATION_FAILURE` | Digest, signature or certificate trust validation failed |
+| `TOKEN_STATE_CONFLICT` | The lifecycle operation is not permitted in the token's current status |
+| `UNKNOWN_TOKEN_REQUESTOR` / `TOKEN_REQUESTOR_MISMATCH` | The token requestor is unknown, or does not own this token |
+| `LOCAL_TRANSACTION_DATE_AND_HASH_REQUIRED` / `LOCAL_TRANSACTION_DATE_INVALID` | A transaction-status read was called without a usable date + hash pair |
+| `DUPLICATE_STATE` | The same state was written twice |
+| `INTERNAL_ERROR` | Anything unclassified on the server |
+
+Both fields are on the result: `DigitiseResult.responseStatus` / `.responseStatusReason` from
+`tokenisation.digitise`, and `VerifyAccountResponse.responseStatus` / `.responseStatusReason` from
+`tokenisation.verifyAccount`. They are `nil` against a backend older than the fields — treat absent
+as "no cause stated", never as a specific one.
+
+A call that fails outright still throws `VeyraWalletError.requestFailed(message:)`; the pair
+describes the answers that *arrive*, which is every decision and every stated refusal.
 
 ### Activation — `status` + `failureCode`
 
@@ -1340,9 +1692,10 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | `.tokenNotActive` | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
 | Digitise `"DECLINED"` | Add card | Per `message` | Show the server's message; the flow ends. Common cause: the account falls outside your provision-context allow-lists. |
 | `.unrecognisedResponseCode` | Add card | Yes | Digitisation answered with a code this SDK version does not know, so the token was discarded and no card was added. Retry; if it persists, update the Veyra SDK. |
-| Activation `"FAILURE"` | Activation | Per `message` | Branch on the [known messages](#activation--status--failure-messages): resend on expiry, cool-down on the rate cap, stop entirely on lockout ("contact your issuer"). |
+| Activation `"FAILURE"` | Activation | Per `failureCode` | Branch on the typed [`failureCode`](#activation--status--failurecode): resend on `.codeExpired`, cool-down on `.codeRequestRateLimited`, stop entirely on `.activationLocked` ("contact your issuer"). |
 | `.tapRefused` | Combined apps | Yes (after mode settles) | The other mode's payment is mid-flight — prompt to finish/cancel it. |
 | `.noNetworkConnection` (both enums; `TapPaymentResult.sdkErrorCode == "NO_NETWORK_CONNECTION"`) | Any backend call, both products | Yes, once connected | The device has no working internet connection and the call never left it. Ask the user to connect and retry. |
+| `TapPaymentResult.sdkErrorCode` non-nil | Merchant tap | Per group | Not a payment outcome — look the value up in [the `sdkErrorCode` catalogue](#sdk-error-codes--the-sdkerrorcode-catalogue) and handle it by its group. |
 
 **Three things end with "get online", and they are not the same thing.** Confusing them produces
 either a card you have wrongly greyed out or a promise of a refresh that cannot happen:

@@ -361,7 +361,9 @@ do {
 session.cancel()
 ```
 
-`session(amountMinorUnits:currencyCode:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`). Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult`: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"`), `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`, plus `creditTransactionID` + `isCreditConfirmationSupported` on an approved sale — the cue to show the "confirming credit" wait and flip it from `transactions.onCreditConfirmation`.
+`session(amountMinorUnits:currencyCode:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`). Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult` carries the outcome in full: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` — the kernel's own), the backend-stated triple `responseCode` / `responseStatus` / `responseStatusReason`, `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`, `sdkErrorCode`, plus `creditTransactionID` + `isCreditConfirmationSupported` on an approved sale — the cue to show the "confirming credit" wait and flip it from `transactions.onCreditConfirmation`.
+
+**Branch on `responseStatus`, display `responseCode`.** `status` is what the EMV run did; `responseStatus` is what the *payment* is, as stated by the backend, and only `APPROVED` / `DECLINED` / `FAILED` are final. `responseStatus` is `nil` against a backend that predates the field and `"Unknown"` for a value newer than this build — treat either as unresolved, never as a refusal. `responseStatusReason` is a plain string to display and log, never to parse.
 
 **The four progress events are hints, not outcomes.** `cardContactLost` says the customer's phone left the field while the card was being read; the interrupted attempt still reports its own `result`, and the reader stays armed for a fresh tap. `cardReadingComplete`, `sendingRequestOnline` and `receivingOnlineResponse` mark the online window — nothing talks to the card after `cardReadingComplete`, so that is the moment to tell the merchant the tap is over. Use them for copy only; never treat one as the end of the payment.
 
@@ -1326,7 +1328,7 @@ call can hand you.
 
 | Call | Carries the outcome in | Statuses it can return | Codes it can return |
 |---|---|---|---|
-| `merchant.tap.session(...)` → `.result(TapPaymentResult)` (**contactless tap**) | `result.status`, `result.sdkErrorCode`, `result.errorMessage`, `result.reference` | `"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` | **The tap result itself carries no response code** — read the code from the recorded row: `transactions.refreshStatus(reference:)`, `transactions.history()` or `transactions.status(...)`. `sdkErrorCode` set means the SDK, not the payment, failed |
+| `merchant.tap.session(...)` → `.result(TapPaymentResult)` (**contactless tap**) | `result.responseCode`, `.responseStatus`, `.responseStatusReason`, `.status`, `.sdkErrorCode`, `.errorMessage`, `.reference` | `responseStatus`: `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"` (or `nil` / `"Unknown"` — treat as unresolved). `status` is the kernel's own run status | The full vocabulary, stated by the backend and carried verbatim. `sdkErrorCode` set means the SDK, not the payment, failed — check it **before** reading any code. The stored row (`transactions.refreshStatus(reference:)`) carries the same triple |
 | `merchant.tap.session(...)` → `.ended(outcome:)` | `outcome` | `"CANCELLED"` / `"TIMEOUT"` / `"ERROR"` / `"UNAVAILABLE"` | — The reader session ended **without** a card; nothing was attempted. Recreate the session |
 | `payments.chargeCustomerQr(_:merchantOrderID:)` (**customer-presented QR**) | `CustomerQrChargeOutcome.approved`, `.responseCode`, `.reference` | — (`approved` is exactly `responseCode == "00"`) | The full vocabulary, and this rail is where `12` (**stale QR — ask the customer to regenerate**) and `13` (amount/currency not the one bound in the QR) actually occur. For the **stated status and reason**, read the recorded row with `transactions.refreshStatus(reference:)`. A transport failure throws instead |
 | `payments.inspectCustomerQr(_:)` | — (throws) | — | — Not a payment call: a throw means "not a payment QR". Show a hint and stay armed for another scan |
@@ -1362,13 +1364,14 @@ see [Typed errors](#typed-errors) and [SDK error codes](#sdk-error-codes--the-sd
 `CustomerQrChargeOutcome` (customer-QR charge) and `PaymentContextState` (merchant-QR poll) — carry
 `responseCode` without `responseStatus` / `responseStatusReason`. Read the recorded row
 (`transactions.refreshStatus(reference:)` → `MerchantTransaction`) when you need the stated status and
-cause; the row carries the full triple on every rail.
+cause; the row carries the full triple on every rail. The **tap** result is no longer one of them: it
+carries the triple itself.
 
 ### Tap acceptance — `TapPaymentResult.status`
 
 Terminal outcomes only — unsupported cards and lost contact **never** produce one of these; they fire the re-tap hints and the reader stays armed.
 
-`TapPaymentResult.status` is `"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` (`PENDING` → poll `transactions.status`; `FAILED` → never reached the server, safe to retry). `TapPaymentEvent.ended(outcome:)` (`"CANCELLED"` / `"TIMEOUT"` / `"ERROR"` / `"UNAVAILABLE"`) means the reader session ended **without** a card — recreate the session to keep accepting.
+`TapPaymentResult.status` is `"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` (`PENDING` → poll `transactions.status`; `FAILED` → never reached the server, safe to retry), and the result carries the backend's own `responseCode` / `responseStatus` / `responseStatusReason` beside it — branch on `responseStatus`, quote `responseCode` on the receipt. `TapPaymentEvent.ended(outcome:)` (`"CANCELLED"` / `"TIMEOUT"` / `"ERROR"` / `"UNAVAILABLE"`) means the reader session ended **without** a card — recreate the session to keep accepting.
 
 The response codes underneath are shared on the wire across rails; where a code surfaces (`responseCode` fields, history rows), handle it as follows:
 
@@ -1827,7 +1830,16 @@ public struct MerchantStatus { let merchantID: String; let status: String? }
 public struct MerchantUpdate { /* see merchant.update */ }
 public struct StoredMerchant { /* full stored profile incl. backend-assigned merchantCategoryCode, terminalID, merchantStatus */ }
 public enum TapPaymentEvent { case cardDetected, unsupportedTarget, cardContactLost, cardReadingComplete, sendingRequestOnline, receivingOnlineResponse, ended(outcome: TapSessionOutcome), result(TapPaymentResult) }
-public struct TapPaymentResult { let status: String; let pan: String?; let cardholderName: String?; let errorMessage: String?; let reference: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }
+public struct TapPaymentResult {
+    let status: String                    // the EMV run's own status
+    let responseCode: String?             // the wire literal — display, never branch
+    let responseStatus: String?           // backend-stated: APPROVED/DECLINED/FAILED/PENDING — BRANCH ON THIS
+    let responseStatusReason: String?     // stated cause, e.g. "INSUFFICIENT_FUNDS" — display, never parse
+    let pan: String?; let cardholderName: String?   // 5F20 display label, e.g. "AFRIGO ****1234"
+    let iccDataHex: String?; let errorMessage: String?; let sdkErrorCode: String?
+    let reference: String?
+    let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?
+}
 public struct PaymentContextQR { let txRef: String; let expiry: String?; let kid: String?; let mpmPayload: String }
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }
 public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String; let cardholderName: String? }

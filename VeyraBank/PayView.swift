@@ -24,6 +24,12 @@ struct PayView: View {
     @State private var working = false
     /// Payment-keys state for the focused card.
     @State private var lukState: LukState?
+
+    /// A payment refused before anything was sent — shown to the payer, and kept apart from
+    /// `actionError` because it is not an error in the call the user just made.
+    @State private var refusal: String?
+    /// The card whose refusals are currently observed, so the registration follows the selection.
+    @State private var observedRefusalsFor: String?
     /// Re-derive card state when the app returns to the foreground — the SDK's
     /// scene-active lifecycle sync may have changed statuses (suspended/unfrozen/wiped).
     @Environment(\.scenePhase) private var scenePhase
@@ -174,7 +180,14 @@ struct PayView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if let actionError {
+            // A refusal is about the payment, not about the call the user just made, so it gets
+            // its own line rather than being folded into `actionError`.
+            if let refusal {
+                Text(refusal)
+                    .font(.footnote).foregroundStyle(Brand.crimson)
+                    .padding(.horizontal).padding(.bottom, 90)
+                    .multilineTextAlignment(.center)
+            } else if let actionError {
                 Text(actionError)
                     .font(.footnote).foregroundStyle(Brand.crimson)
                     .padding(.horizontal).padding(.bottom, 90)
@@ -254,14 +267,50 @@ struct PayView: View {
 
     private func setActive(_ tokenUniqueReference: String) async {
         actionError = nil
+        refusal = nil
         working = true
         defer { working = false }
         do {
             try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
+            observeRefusals(for: tokenUniqueReference)
             await reload()
         } catch {
             actionError = String(describing: error)
         }
+    }
+
+    /// Observe refusals **for one card** — a handler hears only its own token, so switching the
+    /// active card moves the registration rather than accumulating listeners.
+    ///
+    /// The two causes stay apart on purpose, because the advice differs. Connecting fixes
+    /// `onRequireOnline`; it can never fix `onAmountExceedsCardLimit`, whose cap is provisioned
+    /// with the card — so telling the payer to go online there would send them round a loop that
+    /// cannot succeed.
+    private func naira(_ minorUnits: Int64) -> String {
+        "₦" + String(format: "%.2f", Double(minorUnits) / 100)
+    }
+
+    private func observeRefusals(for tokenUniqueReference: String) {
+        guard observedRefusalsFor != tokenUniqueReference else { return }
+        if let previous = observedRefusalsFor {
+            try? VeyraWallet.shared.tokenisation.stopObservingPaymentRefusals(
+                forTokenUniqueReference: previous
+            )
+        }
+        try? VeyraWallet.shared.tokenisation.observePaymentRefusals(
+            forTokenUniqueReference: tokenUniqueReference,
+            onRequireOnline: { _, amountMinorUnits, _ in
+                refusal = "Connect to the internet — this card needs to refresh before it can pay "
+                    + naira(amountMinorUnits) + "."
+            },
+            onAmountExceedsCardLimit: { _, _, cardLimitMinorUnits, _ in
+                refusal = cardLimitMinorUnits.map {
+                    "This card can pay at most " + naira($0)
+                        + " in one payment — try a smaller amount, or another card."
+                } ?? "That amount is too large for this card — try a smaller amount, or another card."
+            }
+        )
+        observedRefusalsFor = tokenUniqueReference
     }
 
     /// Deactivate (used by the long-press menu): backend deactivate + on-device wipe + promotion.

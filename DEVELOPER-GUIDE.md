@@ -1149,7 +1149,30 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | | `.requestFailed(message)` | Backend/network failure | Show the message; offer retry. |
 | `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(softpos:wallet:)` | Configure at launch. |
 
-Both refusals are also available as an observer — `VeyraWallet.shared.tokenisation.observePaymentRefusals(onRequireOnline:onAmountExceedsCardLimit:)`, with `stopObservingPaymentRefusals()` — for hosts that would rather handle them in one place than at every call site. **Porting from Android? The registration shape differs.** On Android the two refusals are **per token**: you hand them to the card you are arming, so different cards can carry different handlers simultaneously. On iOS it is a **single SDK-wide registration** — observing again replaces the previous observer — and the callback's `tokenUniqueReference` tells you which card it was about. Nothing is lost, but Android code that assumes "this handler only ever hears about *this* card" must start filtering on `tokenUniqueReference` here. It is the same last-registration-wins rule the `transactions` observers follow.
+Both refusals are also available as an observer, registered **per card**:
+
+```swift
+try VeyraWallet.shared.tokenisation.observePaymentRefusals(
+    forTokenUniqueReference: card.tokenUniqueReference,
+    onRequireOnline: { _, amountMinorUnits, rail in
+        promptToConnect(amountMinorUnits)
+    },
+    onAmountExceedsCardLimit: { _, amountMinorUnits, cardLimitMinorUnits, rail in
+        offerSmallerAmount(cardLimitMinorUnits)   // never "go online" — the cap does not move
+    }
+)
+
+// when the view goes:
+try VeyraWallet.shared.tokenisation.stopObservingPaymentRefusals(
+    forTokenUniqueReference: card.tokenUniqueReference
+)
+```
+
+A handler registered for one card **never hears about another's**. Registering the same card again replaces its handlers; other cards are unaffected. The pay calls also keep throwing `.onlineRequired` / `.amountExceedsCardLimit`, so this observer is additional — for hosts that would rather handle refusals in one place than at every call site.
+
+**A refusal the SDK could not attribute to a card** — the callback's `tokenUniqueReference` is `nil` — reaches **every** registered handler rather than none. The payer was refused either way, and telling nobody because the card could not be named is the one outcome worth avoiding.
+
+The same ownership model applies on all three platforms, so an integration reads the same wherever it is ported. What differs is the rails, not the API: iOS fires these from the QR rails only, having no tap-to-pay.
 
 ### SDK error codes — the `sdkErrorCode` catalogue
 

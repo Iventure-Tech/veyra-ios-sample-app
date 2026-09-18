@@ -135,7 +135,7 @@ struct AddCardView: View {
             let response = try await VeyraWallet.shared.tokenisation.verifyAccount(
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
-                walletAccountID: user.walletAccountID,
+                walletAccountID: user.emailAddress,
                 accountHolderName: user.accountName,
                 accountNumberSource: "MANUAL" // the account number was keyed in by the user
             )
@@ -158,7 +158,7 @@ struct AddCardView: View {
             let r = try await VeyraWallet.shared.tokenisation.digitise(
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
-                walletAccountID: user.walletAccountID,
+                walletAccountID: user.emailAddress,
                 accountHolderName: user.accountName,
                 emailAddress: user.emailAddress,
                 recommendation: .approve,

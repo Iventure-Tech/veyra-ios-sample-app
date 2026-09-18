@@ -26,8 +26,9 @@ struct SampleMerchant {
     let institutionCode = "000000" // your test institution code
     let accountName = "Ada Demo" // = merchant name
     let bvn = "22222222222"
+    // Also sent as the wallet account id: the SDK hashes it and the issuer compares that hash
+    // against the email/phone registered on the account, so use the registered email.
     let emailAddress = "ada.demo@example.com"
-    let walletAccountID = "ada.demo@example.com"
     let mobileNumber = "2348000000000"
     let addressLine1 = "12 Marina Street"
     let addressLine2 = "Lagos Island"

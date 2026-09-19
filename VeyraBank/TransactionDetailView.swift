@@ -20,6 +20,10 @@ struct TransactionDetailView: View {
     @State private var checkingStatus = false
     @State private var statusCheckNote: String?
     private var liveRow: TransactionSummary { live ?? tx }
+    // Every field this screen displays reads `liveRow`, never `tx`. A manual check
+    // writes `live`, so a label left on `tx` keeps showing the row as it was on arrival — a
+    // resolved payment still reading "Pending" after its Check status button has gone. `tx` is
+    // only the row's identity (its transaction hash) and the fallback.
 
     @State private var linkedReceipt: TransactionReceipt?
     @State private var showingReceipt = false
@@ -49,7 +53,7 @@ struct TransactionDetailView: View {
                     row("Paid by") { Text(paidBy) }
                 }
                 // Registered merchant location — on MPM rows and gateway-reconciled CPM rows.
-                if let location = tx.merchantLocation, !location.isEmpty {
+                if let location = liveRow.merchantLocation, !location.isEmpty {
                     row("Location") { Text(location) }
                 }
                 // The merchant's own order id — always a row, em-dash when absent: a tap/CPM row
@@ -65,17 +69,17 @@ struct TransactionDetailView: View {
                 }
                 // Outcome cause + response code, verbatim from the rail that resolved this row;
                 // legacy/unresolved rows carry neither and show nothing rather than a guess.
-                if let reason = tx.responseStatusReason, !reason.isEmpty {
+                if let reason = liveRow.responseStatusReason, !reason.isEmpty {
                     row("Reason") { Text(reason).font(.subheadline) }
                 }
-                if let code = tx.responseCode, !code.isEmpty {
+                if let code = liveRow.responseCode, !code.isEmpty {
                     row("Response code") { Text(code).font(.subheadline.monospaced()) }
                 }
                 if let (date, time) = recordedAt {
                     row("Date") { Text(date) }
                     row("Time") { Text(time) }
                 }
-                if let currency = tx.transactionCurrencyCode, !currency.isEmpty {
+                if let currency = liveRow.transactionCurrencyCode, !currency.isEmpty {
                     row("Currency") { Text(currency).font(.subheadline.monospaced()) }
                 }
 
@@ -183,7 +187,9 @@ struct TransactionDetailView: View {
         .navigationTitle("Transaction")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadLinkedReceipt() }
-        .task { await watchCreditConfirmation() }
+        // Keyed on the supported flag so the watch starts when a resolving status check is what
+        // puts this row on the credit rail — a pending row usually learns the flag only then.
+        .task(id: liveRow.isCreditConfirmationSupported) { await watchCreditConfirmation() }
         .sheet(isPresented: $showingReceipt) {
             if let linkedReceipt {
                 WalletReceiptDetailView(receipt: linkedReceipt)
@@ -387,7 +393,7 @@ struct TransactionDetailView: View {
 
     /// Display strings for the wallet-perspective entry method.
     private var entryMethodText: String? {
-        switch tx.entryMethod {
+        switch liveRow.entryMethod {
         case "TAP": return "Tapped"
         case "QR_GENERATED": return "Generated QR"
         case "QR_SCANNED": return "Scanned QR"
@@ -397,22 +403,22 @@ struct TransactionDetailView: View {
 
     /// The merchant field may carry "Name*Address".
     private var merchantName: String {
-        tx.merchantName.components(separatedBy: "*").first?.trimmingCharacters(in: .whitespaces) ?? tx.merchantName
+        liveRow.merchantName.components(separatedBy: "*").first?.trimmingCharacters(in: .whitespaces) ?? liveRow.merchantName
     }
 
     private var merchantAddress: String? {
-        let parts = tx.merchantName.components(separatedBy: "*")
+        let parts = liveRow.merchantName.components(separatedBy: "*")
         guard parts.count > 1 else { return nil }
         let address = parts.dropFirst().joined(separator: "*").trimmingCharacters(in: .whitespaces)
         return address.isEmpty ? nil : address
     }
 
     private var amountText: String {
-        String(format: "%.2f", Double(tx.amountInMinorUnit) / 100.0)
+        String(format: "%.2f", Double(liveRow.amountInMinorUnit) / 100.0)
     }
 
     private var statusText: String {
-        switch tx.authorizationStatus {
+        switch liveRow.authorizationStatus {
         case "APPROVED": return "Approved"
         case "DECLINED": return "Declined"
         case "FAILED": return "Failed"
@@ -422,7 +428,7 @@ struct TransactionDetailView: View {
     }
 
     private var statusColor: Color {
-        switch tx.authorizationStatus {
+        switch liveRow.authorizationStatus {
         case "APPROVED": return .green
         case "DECLINED", "FAILED": return Brand.crimson
         case "PENDING": return .orange
@@ -432,7 +438,7 @@ struct TransactionDetailView: View {
 
     /// Recorded time is only carried for the QR rails (`atEpochMillis`); tap rows show no date.
     private var recordedAt: (String, String)? {
-        guard let millis = tx.atEpochMillis else { return nil }
+        guard let millis = liveRow.atEpochMillis else { return nil }
         let date = Date(timeIntervalSince1970: Double(millis) / 1000.0)
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMM d, yyyy"

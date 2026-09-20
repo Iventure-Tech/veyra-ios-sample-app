@@ -199,8 +199,6 @@ let walletConfig = VeyraWalletConfiguration(
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
 
-> **Breaking change:** `allowedCountryCodes` and `allowedMCCs` have been **removed**. The SDK now declares the provisioning domain itself — country, currency and merchant category code are fixed platform values, identical on iOS, Android and React Native, and can no longer be supplied or overridden. Delete both arguments; `allowedAcquirerIDs` and `allowedMerchantIDs` are unchanged.
-
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
 ### `Environment`

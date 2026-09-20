@@ -199,8 +199,6 @@ let walletConfig = VeyraWalletConfiguration(
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
 
-> **Breaking change:** `allowedCountryCodes` and `allowedMCCs` have been **removed**. The SDK now declares the provisioning domain itself — country, currency and merchant category code are fixed platform values, identical on iOS, Android and React Native, and can no longer be supplied or overridden. Delete both arguments; `allowedAcquirerIDs` and `allowedMerchantIDs` are unchanged.
-
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
 ### `Environment`
@@ -226,7 +224,7 @@ There is no configuration parameter for it.
 A combined app is always in exactly one mode: **none**, **receiving** (SoftPOS) or **paying** (Wallet). The SDK manages this for you:
 
 - **Claims are automatic.** The SDK claims a mode at the point of use — starting a tap session claims receiving, executing a wallet payment claims paying — and releases it when the session ends or the payment completes. Backgrounding the app drops it to inert. There is no mode API to call and no `.onAppear`/`.onDisappear` choreography; `currentMode` is available read-only for UI state.
-- **Starts inert, never persisted.** The mode derives from the foreground screen; the app always starts with no mode active — even after being killed mid-payment.
+- **Starts inert, never persisted.** The mode follows your payment activity, not your screens; the app always starts with no mode active — even after being killed mid-payment.
 - **Atomic.** The outgoing capability is fully torn down before the incoming one arms. A merely-armed (untapped) tap payment is cancelled automatically on a switch; a genuinely mid-flight payment refuses the switch instead.
 
 **Cross-mode refusals.** If a tap session is armed while a wallet payment is genuinely mid-flight (or vice versa), the claim is refused — `TapPaymentSession.start()` throws `VeyraSoftPOSError.tapRefused`. Treat it as "finish or cancel the current payment first" and prompt the user. **This never occurs in a standalone single-product app.**
@@ -633,9 +631,9 @@ let response = try await VeyraWallet.shared.tokenisation.verifyAccount(
 if response.isApproved { proceedToDigitise() }
 ```
 
-`walletAccountID` is the customer's identifier with **your** wallet service — email, phone or GUID. The SDK derives a hash from it; it is not sent raw. It must match the value registered with your wallet provider.
+`walletAccountID` is the customer's **registered email address or phone number** — a value the issuer already holds for this account, not an internal id of your own. The SDK derives a hash from it; it is not sent raw. The issuer checks that hash against its own records, so a value it does not know never matches.
 
-`VerifyAccountResponse`: `responseCode` (`"APPROVED"` = eligible), `message` (+ convenience `isApproved`).
+`VerifyAccountResponse`: `responseCode` (`"APPROVED"` = eligible), `responseStatus` (what the call did — `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"`), `responseStatusReason` (the symbolic cause — branch on this), `message` (+ convenience `isApproved`). See [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause).
 
 ---
 
@@ -666,7 +664,7 @@ else if r.requiresActivation { showActivationMethods(r.tokenUniqueReference, r.a
 else { showError(r.message ?? "Could not add card") }
 ```
 
-`DigitiseResult`: `tokenUniqueReference`, `responseCode`, `message`, `activationMethods` (`medium` + masked `contact`), `tokenStored` (provisioning material decrypted and stored), `isApproved`, `requiresActivation`.
+`DigitiseResult`: `tokenUniqueReference`, `responseCode`, `responseStatus`, `responseStatusReason` (the cause — present on `APPROVE_REQUIRE_AUTH` too, where it says why step-up is needed), `message`, `activationMethods` (`medium` + masked `contact`), `tokenStored` (provisioning material decrypted and stored), `isApproved`, `requiresActivation`.
 
 ---
 
@@ -720,7 +718,7 @@ default: showError(response.message ?? "Activation failed")
 }
 ```
 
-`ActivateResponse` failure fields (all nil on success): `failureCode` — typed `ActivationFailureCode` (`.tokenNotFound`, `.tokenNotActivatable`, `.activationLocked`, `.noPendingActivation`, `.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.invalidRequest`, `.activationFailed`, or `.unknown(raw:)` for a code newer than this SDK); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `.must` / `.may` after an exhausted cycle (delete the dead token rather than leaving it in the card list), nil otherwise (raw values in `failureCodeRaw` / `recommendDeleteRaw`).
+`ActivateResponse` failure fields (all nil on success): `failureCode` — typed `ActivationFailureCode` (`.tokenNotFound`, `.tokenNotActivatable`, `.activationLocked`, `.noPendingActivation`, `.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.codeRequestRateLimited`, `.invalidRequest`, `.activationFailed`, or `.unknown(raw:)` for a code newer than this SDK); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `.must` / `.may` after an exhausted cycle (delete the dead token rather than leaving it in the card list), nil otherwise (raw values in `failureCodeRaw` / `recommendDeleteRaw`).
 
 #### `observeActivation` (+ pause / resume / stop)
 
@@ -1263,7 +1261,7 @@ outcome, and it never mints `96`.
 nothing — fix and retry. A failure *after* dispatch may sit over a payment that completed, so the SDK
 stores the transaction and polls it: show "processing", read the row, and **do not re-charge**. You
 never have to work that out yourself — look for a row under this payment's `reference`
-(`transactions.status(forReference:)` / the transactions list) before offering a retry.
+(`transactions.refreshStatus(reference:)` / `transactions.history(limit:)`) before offering a retry.
 
 #### 5. Merchant onboarding and authentication failures
 
@@ -1373,7 +1371,7 @@ call can hand you.
 | `tokenisation.transactionHistory(...)` / `refreshTransactionStatus(transactionHash:)` / `reconcilePendingTransactions()` | `TransactionSummary.authorizationStatus`, `.responseCode`, `.responseStatusReason` | `"PENDING"` (still polling) / `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `nil` (legacy row — indeterminate) | The full vocabulary. Poll answers are `09`, `09` + escalated, `25`, or the settled outcome |
 | `tokenisation.observeTransactionResolved { }` | `WalletTransactionResolution.status`, `.responseCode` | `"APPROVED"` / `"DECLINED"` / `"FAILED"` | The settled outcome's code (keyed on `transactionHash`, not a merchant reference) |
 | `tokenisation.recentActivity(tokenUniqueReference:)` | `TokenActivity.status` | `"APPROVED"` / `"DECLINED"` | — A condensed per-card activity view; read `transactionHistory` for the full triple |
-| `tokenisation.digitise(...)` / `verifyAccount(...)` | `.responseCode`, `.responseStatus`, `.responseStatusReason` on `DigitiseResult` / `VerifyAccountResponse` | `responseStatus`: `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"` | **A different vocabulary:** `"APPROVED"`, `"APPROVE_REQUIRE_AUTH"`, `"DECLINED"` — and anything else means the token is **discarded** (`VeyraWalletError.unrecognisedResponseCode`). The issuer's cause arrives in `message` — see [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) |
+| `tokenisation.digitise(...)` / `verifyAccount(...)` | `.responseCode`, `.responseStatus`, `.responseStatusReason` on `DigitiseResult` / `VerifyAccountResponse` | `responseStatus`: `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"` | **A different vocabulary:** `"APPROVED"`, `"APPROVE_REQUIRE_AUTH"`, `"DECLINED"` — and anything else means the token is **discarded** (`VeyraWalletError.unrecognisedResponseCode`). Branch on `responseStatusReason` for the cause; `message` is the same cause worded for display — see [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) |
 | `tokenisation.requestActivationCode(...)` / `activate(...)` | `ActivationCodeResponse` / `ActivateResponse` — `.status`, `.failureCode`, `.failureCodeRaw`, `.attemptsRemaining`, `.recommendDelete` | `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** the typed [`failureCode`](#activation--status--failurecode) (`.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.codeRequestRateLimited`, `.noPendingActivation`, `.activationLocked`, `.tokenNotFound`, `.tokenNotActivatable`, `.invalidRequest`, `.activationFailed`, `.unknown(raw:)`) |
 | `tokenisation.tokens()` / `tokenStatus(...)` / `deactivateToken(...)` / `observeTokenLifecycle { }` | `StoredCard.status` / `.isActive` / `.requiresOnline`, `TokenStatusUpdateResponse.status`, `TokenStatusChange.canPay` | `"ACTIVE"` / `"PENDING_ACTIVATION"` / `"SUSPENDED"` / `"EXPIRED"` / `"DEACTIVATED"` / `"UNKNOWN"` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
 
@@ -1394,7 +1392,7 @@ carries the triple itself.
 
 Terminal outcomes only — unsupported cards and lost contact **never** produce one of these; they fire the re-tap hints and the reader stays armed.
 
-`TapPaymentResult.status` is `"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` (`PENDING` → poll `transactions.status`; `FAILED` → never reached the server, safe to retry), and the result carries the backend's own `responseCode` / `responseStatus` / `responseStatusReason` beside it — branch on `responseStatus`, quote `responseCode` on the receipt. `TapPaymentEvent.ended(outcome:)` (`"CANCELLED"` / `"TIMEOUT"` / `"ERROR"` / `"UNAVAILABLE"`) means the reader session ended **without** a card — recreate the session to keep accepting.
+`TapPaymentResult.status` is `"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` (`PENDING` → the SDK keeps polling; read the row with `transactions.refreshStatus(reference:)`; `FAILED` → nothing happened, safe to retry), and the result carries the backend's own `responseCode` / `responseStatus` / `responseStatusReason` beside it — branch on `responseStatus`, quote `responseCode` on the receipt. `TapPaymentEvent.ended(outcome:)` (`"CANCELLED"` / `"TIMEOUT"` / `"ERROR"` / `"UNAVAILABLE"`) means the reader session ended **without** a card — recreate the session to keep accepting.
 
 The response codes underneath are shared on the wire across rails; where a code surfaces (`responseCode` fields, history rows), handle it as follows:
 
@@ -1404,7 +1402,7 @@ The response codes underneath are shared on the wire across rails; where a code 
 > or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
 > derives a status from the code, and neither should your app: a code you do not recognise is not a
 > decline. `"99"` is retired — an unheard outcome is now `68` (no reply), `06` (the hop we called
-> failed) or `96` (the SDK/service itself threw), all `PENDING`, while `91` (never connected) and
+> failed) or `96` (a service itself threw — the SDK never mints it), all `PENDING`, while `91` (never connected) and
 > `25` (no such transaction) are `FAILED`, meaning nothing happened and a retry is safe.
 
 
@@ -1412,11 +1410,105 @@ The response codes underneath are shared on the wire across rails; where a code 
 |---|---|---|---|
 | `"00"` | Approved | Yes | Success screen + receipt (`result.reference` → `transactions.receipt(forReference:)`). |
 | `"05"` | Declined by the issuer/server | Yes | Show decline; try another card. A stale customer QR also surfaces as `"05"` on the CPM rail — if the customer's code sat on screen a while, ask them to regenerate and rescan. |
-| `"06"` | Failed before reaching the issuer — validation, cancellation, merchant not active, wrong mode, read failure after the online boundary | Yes (no money moved) | Fix the input/config and re-initiate; `message` says which check failed. |
+| `"06"` | Upstream error — the hop the SDK called failed or answered unintelligibly (`UPSTREAM_ERROR`) | No — `PENDING` | **Do not charge again.** Same as `68`: the request may have been processed; show "processing" and let the SDK poll it to a final status. |
 | `"68"` (was `"99"`) | Pending — sent, no reply received (timeout/network) | Outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
-| `"91"` | Never connected — the request provably never left | **`FAILED`** — nothing happened, retry is safe | Same — poll, don't retry-charge. |
+| `"91"` | Never connected — the request provably never left | Yes — **`FAILED`**, nothing happened | Safe to retry: take the payment again. |
 | `"51"` / `"54"` / `"14"` / `"58"` / `"61"` / `"63"` / `"65"` | Insufficient funds / expired card or token / invalid token / domain restriction / limit exceeded / suspected fraud / velocity limit | Yes | Hard declines — show the named reason (`responseStatusReason` on the stored row) and act on it; see [the full vocabulary](#payment-response-codes--the-full-vocabulary). |
 | `"96"` | System malfunction — **ambiguous**: the payment may have failed *or* succeeded with the response lost | No — `PENDING` | Don't assume failure: the SDK polls it, and it may still settle. Never show it as a decline. |
+
+### Holding a `PENDING` payment, and being told when it settles
+
+Because the SDK no longer invents terminal outcomes, a tap that gets no answer hands you
+`responseStatus == PENDING`. **That is not a failure and not a decline** — the payment may well have
+completed, so the one thing you must not do is charge again.
+
+What the app should do:
+
+1. **Stay on the confirmation screen** and show "processing". Do not navigate away and do not print a
+   receipt yet.
+2. **Let the SDK resolve it.** It stores the transaction and polls with backoff; you do not have to.
+3. **Finish when it settles** — either from `onTransactionResolved` (below) or by reading the row with
+   `transactions.refreshStatus(reference:)` / `transactions.history(limit:)`.
+
+A pending row always converges: it becomes `APPROVED`, `DECLINED` or `FAILED` when the backend settles
+it, or it stays `PENDING`. It never turns into a terminal outcome the SDK made up, and there is no
+attempt cap that gives up on it.
+
+**`TRANSACTION_IN_PROCESS_ESCALATED`** is the one reason that changes what *you* do. It means automated
+reconciliation has stopped and a human will settle the payment. Stop any tight loop of your own, tell
+the merchant "we're looking into this", and re-check lazily — next app open, or a long backoff. It will
+still resolve; it just will not resolve in seconds.
+
+#### `transactions.onTransactionResolved` — the SDK pushes the answer
+
+```swift
+try VeyraSoftPOS.shared.transactions.onTransactionResolved { resolution in
+    // resolution.reference    — which payment (you may have more than one pending)
+    // resolution.status       — "APPROVED" / "DECLINED" / "FAILED" (never "PENDING")
+    // resolution.reason       — e.g. "INSUFFICIENT_FUNDS"
+    // resolution.responseCode — the wire literal, for receipts and support
+}
+
+// …and when you no longer want it:
+try VeyraSoftPOS.shared.transactions.stopObservingTransactionResolved()
+```
+
+Five things worth knowing before you rely on it:
+
+- **Register once, at start-up** — not per payment. It fires for *any* transaction that resolves,
+  including one started in an earlier app session and settled by a later poll. That is the case that
+  matters most: a tap that resolves after your app was backgrounded or killed.
+- **Registration is single-listener: last registration wins.** Calling it again *replaces* the previous
+  observer rather than adding a second one, and `stopObservingTransactionResolved()` clears it. There
+  is no subscription token and no listener list — if two parts of your app both want the answer, fan it
+  out yourself from one registration.
+- **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
+  read `transactions.history(limit:)` at start-up. The observer is a convenience over the store, not a
+  delivery guarantee, so keep the read path.
+- **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
+  this separate channel; the two are not alternatives.
+- It is delivered on the main queue, like the payment callback.
+
+It fires from every rail this platform has — the tap reader, the merchant-presented QR settle and the
+customer-QR charge — because the SDK announces it from the one place a stored row stops being pending.
+
+#### `transactions.onCreditConfirmation` — the funds landed
+
+The settlement half of the same idea: after an approved sale whose response said
+`isCreditConfirmationSupported`, the SDK asks the merchant's bank (exponential backoff, up to 30 days)
+and pushes the answer here.
+
+```swift
+try VeyraSoftPOS.shared.transactions.onCreditConfirmation { confirmation in
+    // confirmation.reference        — which sale
+    // confirmation.status           — "RECEIVED", or the final 30-day "UNABLE_TO_CONFIRM"
+    // confirmation.amountMinorUnits — as the merchant's bank reported it (RECEIVED only)
+    // confirmation.bankReference / .creditedAt / .creditTransactionID
+}
+
+try VeyraSoftPOS.shared.transactions.stopObservingCreditConfirmation()
+```
+
+Same rules as above — main queue, register once, **last registration wins**, no replay — plus one that
+is specific to it: **`UNABLE_TO_CONFIRM` is a give-up, never a reversal.** The payment outcome is
+unchanged; only the *settlement* could not be confirmed. And the answer is written to the sale's stored
+row (`creditConfirmationStatus`) as well as announced, so a screen opened later still shows it — which
+is why the store re-read in `transactions.creditConfirmation`'s recommended pattern stays even when you
+take the callback.
+
+#### When the SDK could not start a payment at all
+
+On iOS a payment that was never attempted — request validation, merchant not onboarded, a stale or
+malformed QR — surfaces as a **thrown error** from the call that refused it, not as a payment outcome.
+There is no response code and no status in that case, deliberately: a response code asserts that a
+payment was attempted and something answered or failed to, so a fabricated one would invite you to
+retry something that never left the device (and put a made-up code on a receipt). Fix the input and
+call again — nothing needs reconciling, because nothing was sent.
+
+On the tap rail, a failure the reader hits before or during dispatch comes back as a
+`TapPaymentResult` with `sdkErrorCode` set and **no** response code or status — the same rule, carried
+on the result object. Look the value up in [the `sdkErrorCode` catalogue](#sdk-error-codes--the-sdkerrorcode-catalogue)
+and handle it by its group.
 
 ### QR context lifecycle — `contextStatus().state`
 
@@ -1438,7 +1530,7 @@ are the values you meet most often on the QR and settlement legs:
 | `"05"` | Definitive decline with no more specific cause | Show decline. Where the gateway knows more you get the specific code instead (`51`, `58`, `61`, `65`…) — read `responseStatusReason` on the stored row. |
 | `"12"` | The QR had expired | Ask for a fresh code and scan again. The card is fine. |
 | `"13"` | The amount or currency does not match the one bound inside the QR | Re-scan the customer's current code; never re-key the amount. |
-| `"96"` | System error — **outcome ambiguous** (`PENDING`, may settle later via reconciliation) | Keep polling (merchant: `contextStatus` / `transactions.status`; wallet: `reconcilePendingTransactions`) before declaring failure. |
+| `"96"` | System error — **outcome ambiguous** (`PENDING`, may settle later via reconciliation) | Keep polling (merchant: `contextStatus` / `transactions.refreshStatus(reference:)`; wallet: `reconcilePendingTransactions`) before declaring failure. |
 | `null` | Not settled yet | Keep polling. |
 
 ### Digitisation & eligibility — `responseCode`
@@ -1705,8 +1797,8 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | You receive | Where | Safe to retry? | Do this |
 |---|---|---|---|
 | Code `"05"` / status `DECLINED` | Merchant tap / rails | Yes (new attempt) | Show decline; try another card or rail. |
-| Code `"06"` / status `FAILED` | Merchant tap | Yes | Nothing reached the issuer — fix what `message` names (input, config, merchant inactive) and re-initiate. |
-| Status `PENDING` (any code: `68`, `06`, `96`, `09`) or `FAILED` with `91` | Merchant tap | **No — never re-charge** | Outcome unknown at the issuer. Show "processing"; the SDK polls and resolves the history row. Re-charging risks a double charge. |
+| Code `"91"` / status `FAILED` | Merchant tap | Yes | The connection never opened — nothing was sent. Take the payment again. |
+| Status `PENDING` (any code: `68`, `06`, `96`, `09`) | Merchant tap | **No — never re-charge** | Outcome unknown at the issuer. Show "processing"; the SDK polls and resolves the history row. Re-charging risks a double charge. |
 | Code `"96"` | Any rail | **No — not yet** | Ambiguous: may have succeeded with the response lost. Poll briefly (context status / transaction status / reconcile) before reporting failure. |
 | `EXPIRED` context / `onExpired` fired | Get-paid QR | Yes | The QR died unpaid (never recorded). Blank it, offer a fresh one. |
 | `inspectCustomerQr` throws | Merchant CPM scan | Yes | Not a payment QR — transient hint, stay armed for another scan. |
@@ -1780,9 +1872,14 @@ public struct MerchantStatusChange {
 }
 
 public struct Bank { let slug: String; let name: String; let institutionCode: String }
-public struct VerifyAccountResponse { let responseCode: String?; let message: String?; var isApproved: Bool }
+public struct VerifyAccountResponse {
+    let responseCode: String?; let message: String?
+    let responseStatus: String?; let responseStatusReason: String?   // what the call did · why (branch on this)
+    var isApproved: Bool
+}
 public struct DigitiseResult {
     let tokenUniqueReference: String?; let responseCode: String?; let message: String?
+    let responseStatus: String?; let responseStatusReason: String?   // what the call did · why (branch on this)
     let activationMethods: [DigitiseActivationMethod]   // medium + masked contact
     let tokenStored: Bool
     var isApproved: Bool; var requiresActivation: Bool
@@ -1791,8 +1888,22 @@ public enum TokenizationRecommendation { case approve, decline, requireAdditiona
 public enum TrustScore { case untrusted, lowTrust, moderateTrust, trusted, highlyTrusted }
 public enum ActivationMethod { case maskedEmail, maskedMobilePhone }
 public enum ActivationReason { case addCard, checkAccountEligibility, other }
-public struct ActivationCodeResponse { let tokenUniqueReference: String?; let expirationDateTime: String?; let status: String?; let message: String? }
-public struct ActivateResponse { let tokenUniqueReference: String?; let status: String?; let message: String? }
+public struct ActivationCodeResponse {
+    let tokenUniqueReference: String?; let expirationDateTime: String?; let status: String?; let message: String?
+    let failureCode: ActivationFailureCode?; let failureCodeRaw: String?   // branch on failureCode, never on message
+}
+public struct ActivateResponse {
+    let tokenUniqueReference: String?; let status: String?; let message: String?
+    let failureCode: ActivationFailureCode?; let failureCodeRaw: String?
+    let attemptsRemaining: Int?                                           // code attempts left where a cap applies
+    let recommendDelete: RecommendDelete?; let recommendDeleteRaw: String? // .must / .may after an exhausted cycle
+}
+public enum ActivationFailureCode {
+    case tokenNotFound, tokenNotActivatable, activationLocked, noPendingActivation, codeExpired, codeInvalid
+    case maxAttemptsExceeded, codeRequestRateLimited, invalidRequest, activationFailed
+    case unknown(raw: String)
+}
+public enum RecommendDelete { case must, may, unknown(raw: String) }
 public struct TokenStatusUpdateResponse { let tokenUniqueReference: String?; let status: String?; let message: String? }
 
 public enum ScanInspection { case verified(VerifiedPayment); case rejected(ScanRejectionReason, detail: String?) }
@@ -1976,100 +2087,6 @@ Use the official React Native SDK —
 [`veyra-sdk-react-native`](https://www.npmjs.com/package/veyra-sdk-react-native) — and
 its [sample app](https://github.com/Iventure-Tech/veyra-react-native-sample-app), whose
 `DEVELOPER-GUIDE.md` is the canonical React Native guide. Do **not** integrate the
-artifacts documented here directly from React Native: the SDK's automatic payment-mode
-arming follows native screen lifecycle, which a React Native app's JavaScript
-navigation does not exercise — the React Native SDK's session hooks exist precisely to
-bridge that gap.
-
-### Holding a `PENDING` payment, and being told when it settles
-
-Because the SDK no longer invents terminal outcomes, a tap that gets no answer hands you
-`responseStatus == PENDING`. **That is not a failure and not a decline** — the payment may well have
-completed, so the one thing you must not do is charge again.
-
-What the app should do:
-
-1. **Stay on the confirmation screen** and show "processing". Do not navigate away and do not print a
-   receipt yet.
-2. **Let the SDK resolve it.** It stores the transaction and polls with backoff; you do not have to.
-3. **Finish when it settles** — either from `onTransactionResolved` (below) or by reading the row with
-   `getTransaction(reference)` / `getLastTransactions()`.
-
-A pending row always converges: it becomes `APPROVED`, `DECLINED` or `FAILED` when the backend settles
-it, or it stays `PENDING`. It never turns into a terminal outcome the SDK made up, and there is no
-attempt cap that gives up on it.
-
-**`TRANSACTION_IN_PROCESS_ESCALATED`** is the one reason that changes what *you* do. It means automated
-reconciliation has stopped and a human will settle the payment. Stop any tight loop of your own, tell
-the merchant "we're looking into this", and re-check lazily — next app open, or a long backoff. It will
-still resolve; it just will not resolve in seconds.
-
-#### `transactions.onTransactionResolved` — the SDK pushes the answer
-
-```swift
-try VeyraSoftPOS.shared.transactions.onTransactionResolved { resolution in
-    // resolution.reference    — which payment (you may have more than one pending)
-    // resolution.status       — "APPROVED" / "DECLINED" / "FAILED" (never "PENDING")
-    // resolution.reason       — e.g. "INSUFFICIENT_FUNDS"
-    // resolution.responseCode — the wire literal, for receipts and support
-}
-
-// …and when you no longer want it:
-try VeyraSoftPOS.shared.transactions.stopObservingTransactionResolved()
-```
-
-Five things worth knowing before you rely on it:
-
-- **Register once, at start-up** — not per payment. It fires for *any* transaction that resolves,
-  including one started in an earlier app session and settled by a later poll. That is the case that
-  matters most: a tap that resolves after your app was backgrounded or killed.
-- **Registration is single-listener: last registration wins.** Calling it again *replaces* the previous
-  observer rather than adding a second one, and `stopObservingTransactionResolved()` clears it. There
-  is no subscription token and no listener list — if two parts of your app both want the answer, fan it
-  out yourself from one registration.
-- **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
-  read `transactions.history(limit:)` at start-up. The observer is a convenience over the store, not a
-  delivery guarantee, so keep the read path.
-- **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
-  this separate channel; the two are not alternatives.
-- It is delivered on the main queue, like the payment callback.
-
-It fires from every rail this platform has — the tap reader, the merchant-presented QR settle and the
-customer-QR charge — because the SDK announces it from the one place a stored row stops being pending.
-
-#### `transactions.onCreditConfirmation` — the funds landed
-
-The settlement half of the same idea: after an approved sale whose response said
-`isCreditConfirmationSupported`, the SDK asks the merchant's bank (exponential backoff, up to 30 days)
-and pushes the answer here.
-
-```swift
-try VeyraSoftPOS.shared.transactions.onCreditConfirmation { confirmation in
-    // confirmation.reference        — which sale
-    // confirmation.status           — "RECEIVED", or the final 30-day "UNABLE_TO_CONFIRM"
-    // confirmation.amountMinorUnits — as the merchant's bank reported it (RECEIVED only)
-    // confirmation.bankReference / .creditedAt / .creditTransactionID
-}
-
-try VeyraSoftPOS.shared.transactions.stopObservingCreditConfirmation()
-```
-
-Same rules as above — main queue, register once, **last registration wins**, no replay — plus one that
-is specific to it: **`UNABLE_TO_CONFIRM` is a give-up, never a reversal.** The payment outcome is
-unchanged; only the *settlement* could not be confirmed. And the answer is written to the sale's stored
-row (`creditConfirmationStatus`) as well as announced, so a screen opened later still shows it — which
-is why the store re-read in `transactions.creditConfirmation`'s recommended pattern stays even when you
-take the callback.
-
-#### When the SDK could not start a payment at all
-
-On iOS a payment that was never attempted — request validation, merchant not onboarded, a stale or
-malformed QR — surfaces as a **thrown error** from the call that refused it, not as a payment outcome.
-There is no response code and no status in that case, deliberately: a response code asserts that a
-payment was attempted and something answered or failed to, so a fabricated one would invite you to
-retry something that never left the device (and put a made-up code on a receipt). Fix the input and
-call again — nothing needs reconciling, because nothing was sent.
-
-(`sdkErrorCode` on the payment response is the Android tap rail's equivalent of the same rule; iOS has
-no tap rail, so here the refusal arrives before any response object exists.)
-
+artifacts documented here directly from React Native: the React Native SDK wraps them
+and adds the session hooks that tell the native layer which JavaScript screen is a
+payment screen — something the native artifacts cannot see on their own.

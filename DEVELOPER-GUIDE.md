@@ -376,7 +376,7 @@ Arm the reader for one sale and wait for the customer's tap. **Non-terminal even
 ```swift
 let session = VeyraSoftPOS.shared.tap.session(
     amountMinorUnits: 32500,
-    merchantOrderID: "ORDER-1042"   // optional — your own order id, never a key
+    merchantOrderID: "ORDER-1042"   // required — your own order id, never a key
 ) { event in
     switch event {
     case .cardDetected:
@@ -415,7 +415,7 @@ do {
 session.cancel()
 ```
 
-`session(amountMinorUnits:currencyCode:merchantOrderID:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`); `merchantOrderID` is your own order id (optional, default `nil`), stored with the transaction and returned on both sides' history. Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult` carries the outcome in full: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` — the kernel's own), the backend-stated triple `responseCode` / `responseStatus` / `responseStatusReason`, `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`, `sdkErrorCode`, plus `creditTransactionID` + `isCreditConfirmationSupported` on an approved sale — the cue to show the "confirming credit" wait and flip it from `transactions.onCreditConfirmation`.
+`session(amountMinorUnits:currencyCode:merchantOrderID:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`); `merchantOrderID` is your own order id — **required** and non-blank (`start()` throws `VeyraSoftPOSError.invalidRequest` for a blank one, before the reader arms) — stored with the transaction and returned on both sides' history. Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult` carries the outcome in full: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` — the kernel's own), the backend-stated triple `responseCode` / `responseStatus` / `responseStatusReason`, `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`, `sdkErrorCode`, plus `creditTransactionID` + `isCreditConfirmationSupported` on an approved sale — the cue to show the "confirming credit" wait and flip it from `transactions.onCreditConfirmation`.
 
 **Branch on `responseStatus`, display `responseCode`.** `status` is what the EMV run did; `responseStatus` is what the *payment* is, as stated by the backend, and only `APPROVED` / `DECLINED` / `FAILED` are final. `responseStatus` is `nil` against a backend that predates the field and `"Unknown"` for a value newer than this build — treat either as unresolved, never as a refusal. `responseStatusReason` is a plain string to display and log, never to parse.
 
@@ -448,7 +448,7 @@ let context = try await VeyraSoftPOS.shared.payments.createContext(
     amountMinorUnits: amount,
     currency: "566",
     onExpired: { qrState = .failed("This payment code has expired — start a new payment") },
-    merchantOrderID: "ORDER-42"        // optional: YOUR order id — never a lookup key
+    merchantOrderID: "ORDER-42"        // required: YOUR order id — never a lookup key
 )
 // render context.mpmPayload verbatim as the QR, then poll:
 while !Task.isCancelled {
@@ -485,7 +485,7 @@ do {
     confirm(scanned.amountMinorUnits, card: scanned.maskedCard)   // merchant confirms the QR's amount
     let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(
         scanned,
-        merchantOrderID: "ORDER-42"                // optional: YOUR order id — never a lookup key
+        merchantOrderID: "ORDER-42"                // required: YOUR order id — never a lookup key
     )
     lastPaymentReference = outcome.reference       // SDK-MINTED reference — use for the receipt
     showResult(approved: outcome.approved, code: outcome.responseCode)
@@ -496,7 +496,7 @@ do {
 
 `CustomerQrChargeOutcome`: `approved: Bool`, `responseCode`, `transactionID`, `reference`, plus `creditTransactionID` + `isCreditConfirmationSupported` (populated on approved charges — the cue to wait for credit confirmation, see `transactions.creditConfirmation`).
 
-> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: optional, echoed back, never validated for uniqueness and never used as a key, so the same value may sit on two attempts of one sale — which is exactly what links a retry to its order. `createContext`, `chargeCustomerQr` and `tap.session` all take it.
+> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: **required** on every merchant payment, echoed back, never validated for uniqueness and never used as a key, so the same value may sit on two attempts of one sale — which is exactly what links a retry to its order. `createContext`, `chargeCustomerQr` and `tap.session` all require it: omitting it does not compile, and a blank (or over-255-character) value throws `VeyraSoftPOSError.invalidRequest` before anything is sent.
 
 ---
 
@@ -1213,6 +1213,7 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | `VeyraSoftPOSError` | `.notConfigured` | Any call before `VeyraSoftPOS.configure(_:customerID:)` | Configure at launch. |
 | | `.notSignedIn` | Any call after `signOut()` and before the next `configure(_:customerID:)` | Send the user to your sign-in; configure with the customer once they are back. |
 | | `.tapRefused(message)` | Arming the tap reader was refused — the wallet's payment is mid-flight (combined apps) | "Finish or cancel the current payment first." Never occurs in a SoftPOS-only app. |
+| | `.invalidRequest(message)` | A call refused **before anything was sent** because an argument is invalid — e.g. a blank `merchantOrderID` on `tap.session` (thrown by `start()`), `chargeCustomerQr` or `createContext` | Fix the call. There is no payment, response code or transaction to look up. Android reports the same as `SdkErrorCode.INVALID_REQUEST`. |
 | | `.noNetworkConnection(message)` | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — on a device with no working internet connection | Ask the merchant to connect and try again. Nothing reached the gateway; no transaction was recorded. |
 | | `.requestFailed(message)` | Backend/network failure | Show the message; offer retry. |
 | `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(customerID:softpos:wallet:)` | Configure at launch. |
@@ -1358,7 +1359,7 @@ The vocabulary is shared, the *surfaces* are not, and two differences matter whe
   `PAYMENT_CANCELLED`, `TRANSACTION_IN_PROGRESS`, `MERCHANT_NOT_ACTIVE`,
   `MERCHANT_PROFILE_INCOMPLETE` and `NFC_MODE_REFUSED` are produced by the Android tap rail's own
   checks before it dispatches; on iOS the equivalent refusals surface as thrown
-  `VeyraSoftPOSError` cases (`.notConfigured`, `.notSignedIn`, `.tapRefused`, `.requestFailed`). Gate your own
+  `VeyraSoftPOSError` cases (`.notConfigured`, `.notSignedIn`, `.tapRefused`, `.invalidRequest`, `.requestFailed`). Gate your own
   get-paid entry on the merchant being registered and active, as the guide's merchant section
   describes.
 - **`sdkErrorCode` is a `String?` here and an enum on Android.** Compare with string literals, and

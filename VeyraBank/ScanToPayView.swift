@@ -188,6 +188,11 @@ struct ScanToPayView: View {
             // The card must go online before it can pay — friendly, actionable copy.
             withAnimation { stage = .confirming(payment) }
             confirmError = message
+        } catch VeyraWalletError.deviceNotBound {
+            // The card was added on another device, or before this app was reinstalled: retrying
+            // can never succeed here — only removing the card and adding it again on this phone.
+            withAnimation { stage = .confirming(payment) }
+            confirmError = "This card can't pay on this phone — remove it and add it again on this phone"
         } catch {
             // Terminal transport/SDK failure: back to confirm with the reason (no false result).
             withAnimation { stage = .confirming(payment) }

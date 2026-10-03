@@ -756,9 +756,11 @@ let cards = try await VeyraWallet.shared.tokenisation.tokens()   // [StoredCard]
 let active = try await VeyraWallet.shared.tokenisation.activeToken
 ```
 
-`StoredCard`: `tokenUniqueReference`, `panLastFour`, `maskedPAN`, `expiry` (`MM/YY`), `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `accountHolderName`, `bankName`, `status`, `requiresActivation`, `isActive`, `requiresOnline`.
+`StoredCard`: `tokenUniqueReference`, `panLastFour`, `maskedPAN`, `expiry` (`MM/YY`), `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `accountHolderName`, `bankName`, `status`, `requiresActivation`, `isActive`, `requiresOnline`, `deviceNotBound`.
 
 **`requiresOnline`** — `true` when the card cannot pay until the wallet has been **online** to refresh it. Render the card greyed-out and non-tappable and prompt the user to connect; the flag derives fresh on every read and clears on its own once the SDK's automatic refresh succeeds. There is no manual "refresh keys" call — key management is entirely SDK-owned.
+
+**`deviceNotBound`** — `true` (default `false`) when the backend refused this card's payment keys because the card was added on a **different device** — or on this phone before the app was reinstalled. Payment keys are issued for a card only to the device it was added on; on this refusal the SDK remembers it for that card, stops all automatic key requests for it (top-up, refresh, maintenance), and `requiresOnline` is always `false` while it is set. Going online does not help, and neither does a smaller amount. Render the card unavailable and tell the user to **add this card again on this phone** — not to connect. The flag clears only when the card is removed.
 
 #### Handling card states in your UI
 
@@ -767,14 +769,15 @@ A card is not simply "there or not" — it can be awaiting activation, frozen fo
 | Precedence | State | How you observe it | UI treatment | What unblocks it |
 |---|---|---|---|---|
 | 1 | **Needs activation** | `card.requiresActivation` | Show the card with an **"Activate"** badge/button that launches the [activation flow](#activation). Pay actions hidden. | `activate` succeeding, or `observeActivation` firing `onActivated`. |
-| 2 | **Requires online** | `card.requiresOnline == true` | **Grey the card out and make it non-tappable**; overlay a "Connect to the internet" hint; disable every pay affordance (scan-to-pay, show-QR buttons). | Nothing you call — the SDK refreshes the card itself the next time the device is online. Re-read the list and the flag has cleared. |
-| 3 | **Inactive server-side** (suspended, expired) | `card.status` (e.g. `"SUSPENDED"`) — and a pay attempt refuses with `.tokenNotActive` | Grey the card out with an **"Unavailable — contact your bank"** indicator; disable pay affordances. Don't offer retry — the state is issuer-controlled. | A later automatic status sync seeing the card active again. |
-| 4 | **Payable** | None of the above | Normal rendering; pay affordances enabled for the active card. | — |
+| 2 | **Not bound to this device** | `card.deviceNotBound == true` — and a pay attempt refuses with `.deviceNotBound` | **Grey the card out and make it non-tappable**; overlay an **"Add this card again on this phone"** hint; disable every pay affordance. Don't prompt to connect — going online cannot fix it. | Only the user removing the card (`deactivateToken`) and adding it again on this phone. **Sticky** until then. |
+| 3 | **Requires online** | `card.requiresOnline == true` | **Grey the card out and make it non-tappable**; overlay a "Connect to the internet" hint; disable every pay affordance (scan-to-pay, show-QR buttons). | Nothing you call — the SDK refreshes the card itself the next time the device is online. Re-read the list and the flag has cleared. |
+| 4 | **Inactive server-side** (suspended, expired) | `card.status` (e.g. `"SUSPENDED"`) — and a pay attempt refuses with `.tokenNotActive` | Grey the card out with an **"Unavailable — contact your bank"** indicator; disable pay affordances. Don't offer retry — the state is issuer-controlled. | A later automatic status sync seeing the card active again. |
+| 5 | **Payable** | None of the above | Normal rendering; pay affordances enabled for the active card. | — |
 
 Two rules make this robust:
 
-- **Derive, don't cache.** Every state above is computed fresh on each read and clears itself — re-read the card list whenever your wallet screen (re)appears and after any payment attempt, rather than storing state.
-- **Gate the affordances, not just the card face.** Disabling only the card image but leaving a "Scan to pay" button live produces the refusal errors at pay time; disable the actions too, and treat the typed refusals (`.onlineRequired` / `.tokenNotActive`) as the backstop, not the primary UX.
+- **Derive, don't cache.** Every state above is computed fresh on each read and clears itself (except **Not bound to this device**, which clears only when the card is removed) — re-read the card list whenever your wallet screen (re)appears and after any payment attempt, rather than storing state.
+- **Gate the affordances, not just the card face.** Disabling only the card image but leaving a "Scan to pay" button live produces the refusal errors at pay time; disable the actions too, and treat the typed refusals (`.onlineRequired` / `.deviceNotBound` / `.tokenNotActive`) as the backstop, not the primary UX.
 
 The sample's card stack + gating:
 
@@ -787,25 +790,30 @@ let cards = try await VeyraWallet.shared.tokenisation.tokens()
         CardView(card).overlay(alignment: .bottom) {
             Button("Activate") { activate(card) }
         }
-    } else if card.requiresOnline {                       // 2. frozen until online
+    } else if card.deviceNotBound {                       // 2. added on another device
+        CardView(card)
+            .opacity(0.4)
+            .allowsHitTesting(false)
+            .overlay(Text("Add this card again on this phone to use it"))
+    } else if card.requiresOnline {                       // 3. frozen until online
         CardView(card)
             .opacity(0.4)                                 // greyed out
             .allowsHitTesting(false)                      // non-tappable
             .overlay(Text("Connect to the internet to use this card"))
-    } else if card.status.uppercased() == "SUSPENDED" {   // 3. suspended server-side
+    } else if card.status.uppercased() == "SUSPENDED" {   // 4. suspended server-side
         CardView(card)
             .opacity(0.4)
             .allowsHitTesting(false)
             .overlay(Text("Card unavailable — contact your bank"))
     } else {
-        CardView(card)                                    // 4. payable
+        CardView(card)                                    // 5. payable
     }
 }
 
 // Screen-level gating:
 func activeCardBlocked(_ cards: [StoredCard]) -> Bool {
     guard let active = cards.first(where: { $0.isActive }) else { return true }
-    return active.requiresOnline || active.status.uppercased() == "SUSPENDED"
+    return active.deviceNotBound || active.requiresOnline || active.status.uppercased() == "SUSPENDED"
 }
 // Re-derive on every appearance and scene-activation (statuses sync in the background):
 .onAppear { Task { await reload() } }
@@ -916,6 +924,7 @@ case "DECLINED", "FAILED": showDeclined(outcome.message, outcome.responseStatusR
 default: showPending(outcome.responseCode)
 }
 // catch VeyraWalletError.onlineRequired — prompt to connect, stay on confirm screen
+// catch VeyraWalletError.deviceNotBound — "add this card again on this phone"; never "go online"
 ```
 
 ---
@@ -1109,7 +1118,7 @@ Task {
 }
 ```
 
-`lukState(tokenUniqueReference:)` returns `LukState(usableKeyCount, refreshDue)` for an optional "keys remaining" indicator. There is deliberately no manual refresh call — the SDK owns when keys refresh; your app only observes (`lukState`, `requiresOnline`).
+`lukState(tokenUniqueReference:)` returns `LukState(usableKeyCount, refreshDue)` for an optional "keys remaining" indicator. There is deliberately no manual refresh call — the SDK owns when keys refresh; your app only observes (`lukState`, `requiresOnline`, `deviceNotBound`).
 
 #### `recentActivity`
 
@@ -1137,6 +1146,7 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | | `.authenticationUnavailable(message)` | This device can perform no authentication at all: no enrolled biometry **and** no passcode | A retry cannot help — send the customer to Settings to set a passcode. |
 | | `.onlineRequired(message)` | The card has no usable payment keys — refused **before** any payment/QR is built | Prompt the user to connect to the internet. Pre-empt it: the card already shows `requiresOnline == true` — grey it out. Clears itself after the SDK's automatic refresh. |
 | | `.amountExceedsCardLimit(message)` | The amount is larger than this card can carry in one payment — refused **before** any payment/QR is built | Offer a smaller amount or another card. Unlike `.onlineRequired` this does **not** clear by going online: the per-payment limit is provisioned with the card. |
+| | `.deviceNotBound(message)` | The card was added on a different device (or on this phone before the app was reinstalled), so the backend will not issue it payment keys — refused **before** any payment/QR is built | Tell the user to remove the card and **add it again on this phone** — the only remedy. Going online does not help, and neither does a smaller amount. Pre-empt it: the card already shows `deviceNotBound == true` — grey it out. Clears only when the card is removed. |
 | | `.tokenNotActive(message)` | The card's server-side status is not active (e.g. suspended by the issuer) — **no payment was attempted** | Tell the user the card is suspended/inactive. Don't retry locally — payments resume automatically once a status sync sees the card active again. |
 | | `.noNetworkConnection(message)` | **Any** wallet backend call — get banks, verify account, digitise, request activation code, activate, check token active, get token status — on a device with no working internet connection | Ask the user to connect and try again. Nothing was sent, so nothing needs undoing. |
 | | `.unrecognisedResponseCode(message)` | Digitisation answered with a response code this SDK version does not recognise, so the token was **discarded** — nothing provisioned, no card added, even when the response carried complete token data | Show the message and offer a retry; update the Veyra SDK if it persists. `message` quotes the raw code for support. A token whose terms the SDK cannot interpret is never installed on a guess. |
@@ -1147,7 +1157,7 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | | `.requestFailed(message)` | Backend/network failure | Show the message; offer retry. |
 | `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(softpos:wallet:)` | Configure at launch. |
 
-Both refusals are also available as an observer, registered **per card**:
+These refusals are also available as an observer, registered **per card**:
 
 ```swift
 try VeyraWallet.shared.tokenisation.observePaymentRefusals(
@@ -1157,6 +1167,9 @@ try VeyraWallet.shared.tokenisation.observePaymentRefusals(
     },
     onAmountExceedsCardLimit: { _, amountMinorUnits, cardLimitMinorUnits, rail in
         offerSmallerAmount(cardLimitMinorUnits)   // never "go online" — the cap does not move
+    },
+    onDeviceNotBound: { _, amountMinorUnits, rail in   // optional — defaults to nil
+        promptToReAddCard()                       // "add this card again on this phone"
     }
 )
 
@@ -1166,11 +1179,13 @@ try VeyraWallet.shared.tokenisation.stopObservingPaymentRefusals(
 )
 ```
 
-A handler registered for one card **never hears about another's**. Registering the same card again replaces its handlers; other cards are unaffected. The pay calls also keep throwing `.onlineRequired` / `.amountExceedsCardLimit`, so this observer is additional — for hosts that would rather handle refusals in one place than at every call site.
+A handler registered for one card **never hears about another's**. Registering the same card again replaces its handlers; other cards are unaffected. The pay calls also keep throwing `.onlineRequired` / `.amountExceedsCardLimit` / `.deviceNotBound`, so this observer is additional — for hosts that would rather handle refusals in one place than at every call site.
+
+`onDeviceNotBound` is an optional trailing parameter (`((_ tokenUniqueReference: String?, _ amountMinorUnits: Int64, _ rail: String) -> Void)? = nil`), so existing registrations compile unchanged. Unlike the other two, it is also a **card state**: the same card reads `deviceNotBound == true` in `tokens()` from then on, until it is removed.
 
 **A refusal the SDK could not attribute to a card** — the callback's `tokenUniqueReference` is `nil` — reaches **every** registered handler rather than none. The payer was refused either way, and telling nobody because the card could not be named is the one outcome worth avoiding.
 
-The same ownership model applies on all three platforms, so an integration reads the same wherever it is ported. What differs is the rails, not the API: iOS fires these from the QR rails only, having no tap-to-pay.
+The same ownership model applies on all three platforms, so an integration reads the same wherever it is ported. What differs is the rails, not the API: iOS fires these from the QR rails only (`rail` is `"CPM_QR"` or `"MPM_QR"`), having no tap-to-pay.
 
 ### SDK error codes — the `sdkErrorCode` catalogue
 
@@ -1373,11 +1388,11 @@ call can hand you.
 | `tokenisation.recentActivity(tokenUniqueReference:)` | `TokenActivity.status` | `"APPROVED"` / `"DECLINED"` | — A condensed per-card activity view; read `transactionHistory` for the full triple |
 | `tokenisation.digitise(...)` / `verifyAccount(...)` | `.responseCode`, `.responseStatus`, `.responseStatusReason` on `DigitiseResult` / `VerifyAccountResponse` | `responseStatus`: `"APPROVED"` / `"DECLINED"` / `"FAILED"` / `"PENDING"` | **A different vocabulary:** `"APPROVED"`, `"APPROVE_REQUIRE_AUTH"`, `"DECLINED"` — and anything else means the token is **discarded** (`VeyraWalletError.unrecognisedResponseCode`). Branch on `responseStatusReason` for the cause; `message` is the same cause worded for display — see [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) |
 | `tokenisation.requestActivationCode(...)` / `activate(...)` | `ActivationCodeResponse` / `ActivateResponse` — `.status`, `.failureCode`, `.failureCodeRaw`, `.attemptsRemaining`, `.recommendDelete` | `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** the typed [`failureCode`](#activation--status--failurecode) (`.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.codeRequestRateLimited`, `.noPendingActivation`, `.activationLocked`, `.tokenNotFound`, `.tokenNotActivatable`, `.invalidRequest`, `.activationFailed`, `.unknown(raw:)`) |
-| `tokenisation.tokens()` / `tokenStatus(...)` / `deactivateToken(...)` / `observeTokenLifecycle { }` | `StoredCard.status` / `.isActive` / `.requiresOnline`, `TokenStatusUpdateResponse.status`, `TokenStatusChange.canPay` | `"ACTIVE"` / `"PENDING_ACTIVATION"` / `"SUSPENDED"` / `"EXPIRED"` / `"DEACTIVATED"` / `"UNKNOWN"` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
+| `tokenisation.tokens()` / `tokenStatus(...)` / `deactivateToken(...)` / `observeTokenLifecycle { }` | `StoredCard.status` / `.isActive` / `.requiresOnline` / `.deviceNotBound`, `TokenStatusUpdateResponse.status`, `TokenStatusChange.canPay` | `"ACTIVE"` / `"PENDING_ACTIVATION"` / `"SUSPENDED"` / `"EXPIRED"` / `"DEACTIVATED"` / `"UNKNOWN"` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
 
 **Reading the table:** a dash in the code column means that call has no response code *by design* —
 minting one would assert that a payment was attempted and something on the wire answered. Where a
-call refuses before anything is sent (card out of keys, over its limit, not active, no network,
+call refuses before anything is sent (card out of keys, over its limit, not active, added on another device, no network,
 authentication dismissed), you get a **typed `VeyraWalletError` / `VeyraSoftPOSError`**, not a code —
 see [Typed errors](#typed-errors) and [SDK error codes](#sdk-error-codes--the-sdkerrorcode-catalogue).
 
@@ -1662,6 +1677,7 @@ The values you can see on the tokenisation surfaces:
 | `UNKNOWN_TOKEN_REQUESTOR` / `TOKEN_REQUESTOR_MISMATCH` | The token requestor is unknown, or does not own this token |
 | `LOCAL_TRANSACTION_DATE_AND_HASH_REQUIRED` / `LOCAL_TRANSACTION_DATE_INVALID` | A transaction-status read was called without a usable date + hash pair |
 | `DUPLICATE_STATE` | The same state was written twice |
+| `DEVICE_NOT_BOUND` | Payment keys were requested for a card from a device other than the one it was added on — or from the same phone after the app was reinstalled. The SDK surfaces it as `StoredCard.deviceNotBound` / `VeyraWalletError.deviceNotBound` and stops asking for that card; the only remedy is to remove the card and add it again on this phone |
 | `INTERNAL_ERROR` | Anything unclassified on the server |
 
 Both fields are on the result: `DigitiseResult.responseStatus` / `.responseStatusReason` from
@@ -1739,6 +1755,23 @@ try VeyraWallet.shared.tokenisation.observeCardKeyState { tokenUniqueReference, 
 }
 ```
 
+`observeCardKeyState(onKeyStateChanged:onDeviceNotBound:)` takes an optional second handler,
+`onDeviceNotBound: ((_ tokenUniqueReference: String) -> Void)? = nil`. When a card becomes
+not-bound to this device and you supply it, it fires **instead of** `onKeyStateChanged` for that
+change. Without it, `onKeyStateChanged` reports `requiresOnline == false` for that card — so read
+`deviceNotBound` from the card list rather than un-greying it:
+
+```swift
+try VeyraWallet.shared.tokenisation.observeCardKeyState(
+    onKeyStateChanged: { tokenUniqueReference, requiresOnline in
+        // grey the card, or un-grey it
+    },
+    onDeviceNotBound: { tokenUniqueReference in
+        // "add this card again on this phone" — going online will not help
+    }
+)
+```
+
 **Read this limit before you word your UI.** It fires from the two moments the SDK is actually
 executing: a payment consuming a key, and a refresh delivering new ones. Payment keys *also* expire
 by clock, which happens with no SDK code running at all — **nothing fires for that**, and such a
@@ -1807,6 +1840,7 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | `.authenticationFailed` | Wallet payments | Yes | Nothing was sent. Stay on the confirm screen; let the user retry the biometric. |
 | `.onlineRequired` | Wallet payments | After going online | Prompt to connect; the SDK refreshes the card itself. Pre-empt with `requiresOnline` (grey the card out). |
 | `.amountExceedsCardLimit` | Wallet payments | **Not by retrying** | The amount exceeds the card's per-payment limit. Going online does **not** help — offer a smaller amount or another card. |
+| `.deviceNotBound` | Wallet payments | **No** | The card was added on another device (or before a reinstall). Going online does **not** help, nor does a smaller amount — tell the user to remove the card and add it again on this phone. Pre-empt with `deviceNotBound` (grey the card out). |
 | `.tokenNotActive` | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
 | Digitise `"DECLINED"` | Add card | Per `message` | Show the server's message; the flow ends. Common cause: the account falls outside your provision-context allow-lists. |
 | `.unrecognisedResponseCode` | Add card | Yes | Digitisation answered with a code this SDK version does not know, so the token was discarded and no card was added. Retry; if it persists, update the Veyra SDK. |
@@ -1851,6 +1885,7 @@ public struct StoredCard {                  // wallet card display record
     let requiresActivation: Bool
     let isActive: Bool                      // the card payments use
     let requiresOnline: Bool                // grey out + prompt to connect
+    let deviceNotBound: Bool                // added on another device: grey out + "add this card again on this phone"
 }
 
 // tokenisation.observeTokenLifecycle payload — branch on canPay, not on status
@@ -2078,7 +2113,8 @@ Camera scan ──► inspectScannedQr
                               payScannedContext
                                         ├─ approved ──► success screen; history row APPROVED
                                         ├─ declined ──► declined screen; history row DECLINED
-                                        └─ onlineRequired ──► "connect to the internet", stay on confirm
+                                        ├─ onlineRequired ──► "connect to the internet", stay on confirm
+                                        └─ deviceNotBound ──► "add this card again on this phone", end flow
 ```
 
 ## Building with React Native?

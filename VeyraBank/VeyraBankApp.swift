@@ -40,6 +40,7 @@ enum SampleConfig {
         // Combined app: configure through the umbrella — installs the exclusive-mode arbiter
         // and starts inert (.none).
         VeyraSDK.configure(
+            customerID: DemoSession.customerID,
             softpos: .init(
                 environment: .test,
                 // The provider credential the gateway resolves the acquirer id and MCC from —
@@ -74,7 +75,8 @@ struct VeyraBankApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        SampleConfig.configureSdks()
+        // Every launch tells the SDKs who is logged in; a signed-out app tells them nothing.
+        if DemoSession.isSignedIn { SampleConfig.configureSdks() }
     }
 
     var body: some Scene {
@@ -112,6 +114,8 @@ struct HomeView: View {
     @State private var registered = false
     @State private var showMerchantSettings = false
     @State private var merchantActionMessage: String?
+    @State private var signedIn = DemoSession.isSignedIn
+    @State private var customerID = DemoSession.customerID
 
     var body: some View {
         ZStack {
@@ -126,6 +130,19 @@ struct HomeView: View {
                     .foregroundStyle(.white)
                 Text("Mode: \(mode.rawValue)")
                     .font(.footnote).foregroundStyle(.gray)
+                // Customer bar: who the app has signed in to the SDKs, switch, sign out.
+                HStack {
+                    Text(signedIn ? "Signed in as \(customerID)" : "Signed out")
+                        .font(.footnote).foregroundStyle(.gray)
+                    Spacer()
+                    if signedIn {
+                        Button("Switch") { DemoSession.switchCustomer(); refresh() }
+                        Button("Sign out") { DemoSession.signOut(); refresh() }
+                    } else {
+                        Button("Sign in") { DemoSession.signIn(); refresh() }
+                    }
+                }
+                .font(.footnote)
                 if let merchantActionMessage {
                     Text(merchantActionMessage)
                         .font(.footnote).foregroundStyle(.gray)
@@ -136,9 +153,11 @@ struct HomeView: View {
                 } label: {
                     HomeTile(
                         title: "Get paid",
-                        subtitle: registered
-                            ? "SoftPOS — enter an amount to get paid"
-                            : "Register as a merchant in Settings to accept payments"
+                        subtitle: !signedIn
+                            ? "Sign in to use the wallet and get paid"
+                            : registered
+                                ? "SoftPOS — enter an amount to get paid"
+                                : "Register as a merchant in Settings to accept payments"
                     )
                 }
                 .disabled(!registered)
@@ -148,6 +167,8 @@ struct HomeView: View {
                 } label: {
                     HomeTile(title: "Pay", subtitle: "Wallet — add a card: choose your bank")
                 }
+                .disabled(!signedIn)
+                .opacity(signedIn ? 1 : 0.45)
                 Spacer()
             }
             .padding()
@@ -156,7 +177,9 @@ struct HomeView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Not registered: the gear jumps straight to registration; registered:
                 // Edit profile / Activate / Deactivate.
-                if registered {
+                if !signedIn {
+                    EmptyView() // merchant settings are a signed-in customer's
+                } else if registered {
                     Menu {
                         Button("Edit profile") { showMerchantSettings = true }
                         Button("Activate") { Task { await merchantAction(activate: true) } }
@@ -183,10 +206,14 @@ struct HomeView: View {
             }
             .hidden()
         )
-        .onAppear {
-            mode = VeyraSDK.shared.currentMode
-            registered = VeyraSoftPOS.shared.merchant.isRegistered
-        }
+        .onAppear { refresh() }
+    }
+
+    private func refresh() {
+        mode = VeyraSDK.shared.currentMode
+        signedIn = DemoSession.isSignedIn
+        customerID = DemoSession.customerID
+        registered = signedIn && VeyraSoftPOS.shared.merchant.isRegistered
     }
 
     private func merchantAction(activate: Bool) async {

@@ -21,6 +21,8 @@ Building for Android? See the Android guide in the Android sample repo: https://
 
 A combined app is always in exactly one **mode** — none, receiving (SoftPOS) or paying (Wallet). The mode switches **implicitly** with your payment activity — the SDK claims it when a tap session or wallet payment starts and releases it when they finish; see [Exclusive mode](#exclusive-mode-combined-apps).
 
+Everything the SDK keeps on the device belongs to **one customer** — the one your app has signed in. You tell the SDK who that is every time you configure it, and call `signOut()` when they log out; see [Customers: signing in, signing out, switching](#customers-signing-in-signing-out-switching). Upgrading from 1.x? See [Migrating from 1.x to 2.0.0](#migrating-from-1x-to-200).
+
 > **iOS note:** tap **acceptance** on iPhone reads the customer's Android Veyra wallet over CoreNFC. Tap-to-**pay** (card emulation) is not available on iOS — Apple restricts card emulation — so the iOS wallet pays by QR (scan-to-pay and show-QR-to-pay).
 
 ---
@@ -94,14 +96,18 @@ The package includes a prebuilt binary that Xcode downloads and checksum-verifie
 ### `VeyraSDK` (combined apps)
 
 ```swift
-VeyraSDK.configure(softpos: softposConfig, wallet: walletConfig)
+VeyraSDK.configure(customerID: signedInCustomer, softpos: softposConfig, wallet: walletConfig)
+
+// when the customer logs out:
+VeyraSDK.signOut()
 ```
 
 **Members:**
 
 | Member | Parameters | Description |
 |--------|------------|-------------|
-| `configure(softpos:wallet:)` | Both member configurations | Configures both SDKs plus the exclusive-mode arbiter. The process starts **inert**; safe to call again (reconfigures, stays inert). Call once at launch. |
+| `configure(customerID:softpos:wallet:)` | The signed-in customer's id + both member configurations | Configures both SDKs for that customer, plus the exclusive-mode arbiter. **Call at every launch** — the SDK never remembers who is signed in. The process starts **inert**; safe to call again (reconfigures, stays inert). A different customer stops the previous customer's work in both SDKs. `customerID` must not be blank and never leaves the device. |
+| `signOut()` | — | Static. The customer has logged out: both member SDKs stop everything they run for them and drop every observer registration. Their cards, merchant and history stay on the device for when they sign in again. |
 | `shared` | — | The singleton. |
 | `currentMode` | — | The current exclusive mode (`VeyraMode.none` / `.softpos` / `.wallet`). Read-only observation for UI state — the mode itself is entirely SDK-managed. |
 
@@ -110,7 +116,8 @@ In a standalone single-product app (only `VeyraSoftPOS` *or* only `VeyraWallet`)
 ### `VeyraSoftPOS` (merchant features)
 
 ```swift
-VeyraSoftPOS.configure(configuration)          // standalone; combined apps configure via VeyraSDK
+// standalone; combined apps configure via VeyraSDK
+VeyraSoftPOS.configure(configuration, customerID: signedInCustomer)
 let merchant = VeyraSoftPOS.shared.merchant
 ```
 
@@ -118,7 +125,8 @@ let merchant = VeyraSoftPOS.shared.merchant
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:)` | Configure the SDK. Call once, before any service use (subsequent calls reconfigure). |
+| `configure(_:customerID:)` | Configure the SDK for the customer your app has signed in. **Call at every launch**, before any service use (subsequent calls reconfigure). The merchant and its transactions are kept per customer: the same customer again changes nothing; a different customer stops the previous customer's watches and opens the new customer's merchant. `customerID` must not be blank and never leaves the device. |
+| `signOut()` | Static. The customer has logged out: stops every merchant watch and drops every observer registration. Their merchant and transactions stay on the device. Until the next `configure` every call throws `VeyraSoftPOSError.notSignedIn`. |
 | `shared` | The singleton. |
 | `merchant` | Merchant lifecycle — registration, status, activate/deactivate, profile update, banks, stored merchant, and `onMerchantStatusChanged` (the SDK watches the merchant's backend status for you). |
 | `tap` | Contactless tap acceptance — the customer's Android Veyra wallet taps this iPhone. |
@@ -128,7 +136,8 @@ let merchant = VeyraSoftPOS.shared.merchant
 ### `VeyraWallet` (wallet features)
 
 ```swift
-VeyraWallet.configure(configuration)           // standalone; combined apps configure via VeyraSDK
+// standalone; combined apps configure via VeyraSDK
+VeyraWallet.configure(configuration, customerID: signedInCustomer)
 let tokenisation = VeyraWallet.shared.tokenisation
 ```
 
@@ -136,7 +145,8 @@ let tokenisation = VeyraWallet.shared.tokenisation
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:)` | Configure the SDK. Call once, before any service use (subsequent calls reconfigure). |
+| `configure(_:customerID:)` | Configure the SDK for the customer your app has signed in. **Call at every launch**, before any service use (subsequent calls reconfigure). Cards, keys, history and receipts are kept per customer: the same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. `customerID` must not be blank and never leaves the device. |
+| `signOut()` | Static. The customer has logged out: stops everything the wallet runs for them (key top-ups, status syncs, history sweeps) and drops every observer registration. Their cards, keys, history and receipts stay on the device. Until the next `configure` every call throws `VeyraWalletError.notSignedIn`. |
 | `shared` | The singleton. |
 | `tokenisation` | The wallet service — bank lookup, eligibility, digitise, activation, cards, payments, history, receipts. |
 | `paymentApplicationInstanceID()` | This install's SDK-generated `payment_application_instance_id` (`VYRA` + 32 hex chars): minted on first use, persisted install-scoped (never backed up), new on reinstall. Read-only. |
@@ -231,13 +241,57 @@ A combined app is always in exactly one mode: **none**, **receiving** (SoftPOS) 
 
 ---
 
+## Customers: signing in, signing out, switching
+
+The SDK keeps **everything per customer**: the wallet's cards, payment keys, history and receipts, and the SoftPOS merchant and its transactions. Two people sharing one phone — or one person with two accounts in your app — each see only their own. The customer is whoever **your app** has authenticated; the SDK does not log anyone in and never remembers who is signed in.
+
+```swift
+// At every launch, once your app knows who is logged in:
+VeyraSDK.configure(customerID: session.customerID, softpos: softposConfig, wallet: walletConfig)
+registerObservers()            // observers belong to the signed-in customer
+
+// When the customer logs out:
+VeyraSDK.signOut()
+```
+
+- **Pass the id every launch.** `customerID` is required on every `configure` — there is no "last customer" the SDK falls back to. If nobody is logged in, don't configure; call `configure` when they sign in. Use a stable identifier for the customer from your own system. It never leaves the device: only a one-way hash of it names the files and Keychain entries the SDK writes.
+- **Same customer again** — nothing is stopped and nothing is downloaded; calling `configure` at every launch is free.
+- **A different customer** — the previous customer's work (key top-ups, status syncs, history sweeps, merchant watches) is stopped, and the new customer's cards and merchant are opened. Nothing of the previous customer's is deleted: it is waiting for them when they sign in again.
+- **`signOut()`** stops every loop, sweep, watch and observer the SDK runs for the customer. Their cards, **payment keys**, history, receipts, merchant and transactions all **stay on the device**. Signing the same customer back in downloads nothing for cards that still have keys; a card that has none gets them in the background.
+- **Register observers again after `configure`.** Observer registrations (`observeTokenLifecycle`, `observeCardKeyState`, `observePaymentRefusals`, `observeTransactionResolved`, `merchant.onMerchantStatusChanged`, `transactions.onTransactionResolved`, `transactions.onCreditConfirmation`, …) are dropped on a customer switch and on sign-out, so one customer's events can never reach another's screens. Register them again after every `configure`.
+- **After `signOut()`**, every call throws `VeyraWalletError.notSignedIn` / `VeyraSoftPOSError.notSignedIn` until the next `configure`. (`.notConfigured` still means `configure` was never called in this process.) Gate your wallet and get-paid entry points on your own logged-in state.
+- **Uninstalling the app** removes every customer's data. There is no API to wipe the device for all customers.
+
+The sample app shows the pattern on its Home screen: a customer bar with **Switch** (signs in the other demo customer), **Sign out** and **Sign in**, with the wallet and get-paid tiles disabled while signed out.
+
+---
+
+## Migrating from 1.x to 2.0.0
+
+2.0.0 makes the SDK customer-aware. The breaking changes:
+
+| 1.x | 2.0.0 |
+|---|---|
+| `VeyraSDK.configure(softpos:wallet:)` | `VeyraSDK.configure(customerID:softpos:wallet:)` |
+| `VeyraWallet.configure(_:)` | `VeyraWallet.configure(_:customerID:)` |
+| `VeyraSoftPOS.configure(_:)` | `VeyraSoftPOS.configure(_:customerID:)` |
+| — | `signOut()` on `VeyraSDK`, `VeyraWallet` and `VeyraSoftPOS` — call it when the customer logs out |
+| — | New error cases `VeyraWalletError.notSignedIn` and `VeyraSoftPOSError.notSignedIn` — handle them wherever you switch over those enums |
+| `VeyraWallet.shared.tokenisation.wipeAll()` | **Removed.** Call `signOut()` when a customer logs out; uninstalling the app clears everything. |
+| `VeyraSoftPOS.shared.merchant.clearStored()` | **Removed.** A successful registration overwrites the stored merchant. |
+| Observers survive for the life of the process | Observers are dropped on a customer switch and on `signOut()` — register them again after `configure` |
+
+**Data from before 2.0.0 is erased, not migrated.** It belonged to no particular customer, so on the first launch of 2.0.0 the SDK deletes it rather than hand it to whoever signs in first. Your customers add their cards again, and merchants register again.
+
+---
+
 ## SoftPOS — accepting payments
 
 Service accessors: `VeyraSoftPOS.shared.merchant`, `.tap`, `.payments`, `.transactions`. All async methods throw `VeyraSoftPOSError` and deliver events on the main queue.
 
 ### Merchant registration & profile
 
-A device must have a **registered, active merchant** before it can accept payments. Registration persists the merchant on the device (SDK-owned storage, cleared on uninstall); the backend assigns the merchant ID, terminal ID and category code.
+A device must have a **registered, active merchant** before it can accept payments. Registration persists the merchant on the device for the signed-in customer (SDK-owned storage, cleared on uninstall; a later successful registration overwrites it); the backend assigns the merchant ID, terminal ID and category code.
 
 ---
 
@@ -292,7 +346,6 @@ Pass the chosen bank's `institutionCode` to registration.
 | `merchant.stored: StoredMerchant?` | The persisted merchant, or `nil`. |
 | `merchant.status(merchantID:)` | Current backend status → `MerchantStatus(merchantID, status)` (e.g. `"ACTIVE"`, `"DEACTIVATED"`); refreshes the stored merchant's status. |
 | `merchant.activate(merchantID:)` / `deactivate(merchantID:)` | Backend activate/deactivate → `MerchantStatus`. |
-| `merchant.clearStored()` | Clear the stored merchant (logout / re-registration). |
 
 Payments are refused for inactive merchants — call `status(merchantID:)` at the activation moment.
 
@@ -832,12 +885,14 @@ try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
 
 **Tap-to-pay is Android-only** — on iOS the wallet pays by QR (Apple restricts card emulation).
 
-#### `tokenisation.deactivateToken` / `wipeAll`
+#### `tokenisation.deactivateToken`
 
 | Method | Behaviour |
 |---|---|
 | `deactivateToken(ref)` | Deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active. On failure nothing local changes. Named to match Android and React Native, which call the same operation the same way. |
-| `wipeAll()` | Wipe every card and all SDK-held data from this device (local only). |
+
+There is no call to wipe every card: when a customer logs out, call `signOut()` — their cards stay
+on the device for when they sign in again (see [Customers](#customers-signing-in-signing-out-switching)).
 
 Use `deactivateToken` for the user's "remove card" action. If the backend call fails, **surface the
 error and let the customer try again** — don't wipe the card locally anyway. A device-only wipe
@@ -998,7 +1053,7 @@ delivered on the main thread. `stopObservingTransactionResolved()` clears it.
 
 Did the money actually reach the merchant's bank? The wallet asks the same question the merchant's own SDK asks about that sale, from the payer's side — **settlement confirmation only**, it never changes or restates the payment outcome.
 
-**The SDK does the polling; your view renders the stored row.** Once a payment is approved, an app-scoped sweep started at `configure(_:)` asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`transactionHistory(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
+**The SDK does the polling; your view renders the stored row.** Once a payment is approved, a sweep started at `configure(_:customerID:)` for the signed-in customer asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`transactionHistory(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
 
 These three fields are the **eligibility contract**: they are how you decide whether to render a
 credit line at all, and whether you may call `refreshCreditConfirmation` (below). They are not merely
@@ -1140,7 +1195,8 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 
 | Error | Case | When | What to do |
 |---|---|---|---|
-| `VeyraWalletError` | `.notConfigured` | Any call before `VeyraWallet.configure(_:)` | Configure at launch. |
+| `VeyraWalletError` | `.notConfigured` | Any call before `VeyraWallet.configure(_:customerID:)` | Configure at launch. |
+| | `.notSignedIn` | Any call after `signOut()` and before the next `configure(_:customerID:)` | Send the user to your sign-in; configure with the customer once they are back. |
 | | `.authenticationCancelled(message)` | The customer dismissed the Face ID / Touch ID / passcode sheet the SDK raised — **no payment was attempted**, nothing was sent | Stay on the confirm screen and let them start the payment again. |
 | | `.authenticationFailed(message)` | Authentication was attempted and did not succeed — **no payment was attempted**, nothing recorded | Stay on the confirm screen; offer a retry. |
 | | `.authenticationUnavailable(message)` | This device can perform no authentication at all: no enrolled biometry **and** no passcode | A retry cannot help — send the customer to Settings to set a passcode. |
@@ -1151,11 +1207,12 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | | `.noNetworkConnection(message)` | **Any** wallet backend call — get banks, verify account, digitise, request activation code, activate, check token active, get token status — on a device with no working internet connection | Ask the user to connect and try again. Nothing was sent, so nothing needs undoing. |
 | | `.unrecognisedResponseCode(message)` | Digitisation answered with a response code this SDK version does not recognise, so the token was **discarded** — nothing provisioned, no card added, even when the response carried complete token data | Show the message and offer a retry; update the Veyra SDK if it persists. `message` quotes the raw code for support. A token whose terms the SDK cannot interpret is never installed on a guess. |
 | | `.requestFailed(message)` | Everything else (network, backend, invalid input) | Show `error.localizedDescription` — every case carries its underlying message. |
-| `VeyraSoftPOSError` | `.notConfigured` | Any call before `VeyraSoftPOS.configure(_:)` | Configure at launch. |
+| `VeyraSoftPOSError` | `.notConfigured` | Any call before `VeyraSoftPOS.configure(_:customerID:)` | Configure at launch. |
+| | `.notSignedIn` | Any call after `signOut()` and before the next `configure(_:customerID:)` | Send the user to your sign-in; configure with the customer once they are back. |
 | | `.tapRefused(message)` | Arming the tap reader was refused — the wallet's payment is mid-flight (combined apps) | "Finish or cancel the current payment first." Never occurs in a SoftPOS-only app. |
 | | `.noNetworkConnection(message)` | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — on a device with no working internet connection | Ask the merchant to connect and try again. Nothing reached the gateway; no transaction was recorded. |
 | | `.requestFailed(message)` | Backend/network failure | Show the message; offer retry. |
-| `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(softpos:wallet:)` | Configure at launch. |
+| `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(customerID:softpos:wallet:)` | Configure at launch. |
 
 These refusals are also available as an observer, registered **per card**:
 
@@ -1298,7 +1355,7 @@ The vocabulary is shared, the *surfaces* are not, and two differences matter whe
   `PAYMENT_CANCELLED`, `TRANSACTION_IN_PROGRESS`, `MERCHANT_NOT_ACTIVE`,
   `MERCHANT_PROFILE_INCOMPLETE` and `NFC_MODE_REFUSED` are produced by the Android tap rail's own
   checks before it dispatches; on iOS the equivalent refusals surface as thrown
-  `VeyraSoftPOSError` cases (`.notConfigured`, `.tapRefused`, `.requestFailed`). Gate your own
+  `VeyraSoftPOSError` cases (`.notConfigured`, `.notSignedIn`, `.tapRefused`, `.requestFailed`). Gate your own
   get-paid entry on the merchant being registered and active, as the guide's merchant section
   describes.
 - **`sdkErrorCode` is a `String?` here and an enum on Android.** Compare with string literals, and

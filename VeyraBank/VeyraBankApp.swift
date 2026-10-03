@@ -130,19 +130,6 @@ struct HomeView: View {
                     .foregroundStyle(.white)
                 Text("Mode: \(mode.rawValue)")
                     .font(.footnote).foregroundStyle(.gray)
-                // Customer bar: who the app has signed in to the SDKs, switch, sign out.
-                HStack {
-                    Text(signedIn ? "Signed in as \(customerID)" : "Signed out")
-                        .font(.footnote).foregroundStyle(.gray)
-                    Spacer()
-                    if signedIn {
-                        Button("Switch") { DemoSession.switchCustomer(); refresh() }
-                        Button("Sign out") { DemoSession.signOut(); refresh() }
-                    } else {
-                        Button("Sign in") { DemoSession.signIn(); refresh() }
-                    }
-                }
-                .font(.footnote)
                 if let merchantActionMessage {
                     Text(merchantActionMessage)
                         .font(.footnote).foregroundStyle(.gray)
@@ -174,6 +161,27 @@ struct HomeView: View {
             .padding()
         }
         .toolbar {
+            // Who the app has signed in to the SDKs, with Switch / Sign out (or Sign in). In the
+            // navigation bar, not the stacked content, so it never pushes the tiles off a
+            // shorter screen.
+            ToolbarItem(placement: .navigationBarLeading) {
+                Menu {
+                    if signedIn {
+                        Button("Switch customer") { DemoSession.switchCustomer(); refresh() }
+                        Button("Sign out", role: .destructive) { DemoSession.signOut(); refresh() }
+                    } else {
+                        Button("Sign in") { DemoSession.signIn(); refresh() }
+                    }
+                } label: {
+                    // An HStack, not a Label: a toolbar Label shows only its icon, and the name
+                    // is the point.
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.crop.circle")
+                        Text(signedIn ? customerID : "Signed out").lineLimit(1)
+                    }
+                    .font(.footnote)
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Not registered: the gear jumps straight to registration; registered:
                 // Edit profile / Activate / Deactivate.

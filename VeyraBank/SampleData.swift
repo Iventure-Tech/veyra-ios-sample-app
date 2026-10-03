@@ -8,6 +8,7 @@
 // Veyra onboarding pack — digitise/eligibility is checked against the issuer's test records,
 // so an unknown account number is declined.
 import Foundation
+import VeyraSDK
 
 /// A demo account holder (Personal or Business). `merchantName == accountName` for both
 /// (a business's name replaces the individual's name).
@@ -58,7 +59,45 @@ struct SampleMerchant {
 }
 
 /// Typed access point for the demo identities.
+/// The app's own login session. Who is logged in is the banking app's to remember, never the
+/// SDK's: the SDKs are told on every launch (configure) and forget on signOut.
+enum DemoSession {
+    private static let customerKey = "veyraBank.demoCustomer"
+    private static let signedInKey = "veyraBank.signedIn"
+
+    /// The customer the app has logged in (the last one, while signed out).
+    static var customerID: String {
+        UserDefaults.standard.string(forKey: customerKey) ?? SampleData.customerIDs[0]
+    }
+
+    static var isSignedIn: Bool {
+        UserDefaults.standard.object(forKey: signedInKey) as? Bool ?? true
+    }
+
+    /// Log `customerID` in and tell the SDKs: they open that customer's cards and merchant.
+    static func signIn(_ customerID: String = DemoSession.customerID) {
+        UserDefaults.standard.set(customerID, forKey: customerKey)
+        UserDefaults.standard.set(true, forKey: signedInKey)
+        SampleConfig.configureSdks()
+    }
+
+    /// Log in the other demo customer: the SDKs stop the first customer's work and switch.
+    static func switchCustomer() {
+        let ids = SampleData.customerIDs
+        let next = ids[((ids.firstIndex(of: customerID) ?? 0) + 1) % ids.count]
+        signIn(next)
+    }
+
+    /// Log out: the SDKs stop everything for this customer; their data stays on the device.
+    static func signOut() {
+        VeyraSDK.signOut()
+        UserDefaults.standard.set(false, forKey: signedInKey)
+    }
+}
+
 enum SampleData {
+    /// The demo customers this app can sign in to the SDKs — two, so Home can show a switch.
+    static let customerIDs = ["demo-customer-1", "demo-customer-2"]
     static let personal = SampleMerchant(kind: .personal)
     static let business = SampleMerchant(kind: .business)
 

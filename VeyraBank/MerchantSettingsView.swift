@@ -193,16 +193,6 @@ struct MerchantSettingsView: View {
                 .disabled(busy)
             progressAndMessages(busyLabel: "Saving…")
         }
-        Section {
-            Button("Clear registration", role: .destructive) {
-                VeyraSoftPOS.shared.merchant.clearStored()
-                resultText = nil
-                errorText = nil
-                load()
-            }
-        } footer: {
-            Text("Sample-only: clears the merchant stored on this device so you can register again.")
-        }
     }
 
     @ViewBuilder

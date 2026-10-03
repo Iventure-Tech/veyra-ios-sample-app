@@ -1,8 +1,8 @@
 // Add a card: choose your bank, check account eligibility, digitise —
 // reached from the wallet
 // screen's `+`. Prefill comes from SampleData and the signed-in customer — never hardcode demo
-// values in a view. Customer id, account name and BVN are editable, and what is entered is
-// what is sent.
+// values in a view. Customer id, account name, BVN and email are editable, and what is
+// entered is what is sent.
 import SwiftUI
 import VeyraSDK
 import VeyraWallet
@@ -26,6 +26,9 @@ struct AddCardView: View {
     @State private var customerID: String
     @State private var accountName: String
     @State private var bvn: String
+    // Also the wallet account id: the SDK hashes it and the issuer compares that hash with the
+    // email/phone registered on the account.
+    @State private var email: String
     @State private var eligibility: String?
     @State private var eligibilityError: String?
     @State private var checking = false
@@ -41,6 +44,7 @@ struct AddCardView: View {
         _customerID = State(initialValue: DemoSession.customerID)
         _accountName = State(initialValue: SampleData.personal.accountName)
         _bvn = State(initialValue: SampleData.personal.bvn)
+        _email = State(initialValue: SampleData.personal.emailAddress)
     }
 
     var body: some View {
@@ -55,6 +59,10 @@ struct AddCardView: View {
                     .textInputAutocapitalization(.words)
                 TextField("BVN", text: $bvn)
                     .keyboardType(.numberPad)
+                TextField("Email", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                 if let formError {
                     Text(formError).font(.footnote).foregroundStyle(Brand.crimson)
                 }
@@ -130,10 +138,16 @@ struct AddCardView: View {
         if trimmed(customerID).isEmpty { formError = "Enter the customer ID"; return false }
         if trimmed(accountName).isEmpty { formError = "Enter the account name"; return false }
         if trimmed(bvn).isEmpty { formError = "Enter the BVN"; return false }
+        if !isPlausibleEmail(trimmed(email)) { formError = "Enter a valid email"; return false }
         if !DemoSession.isSignedIn || DemoSession.customerID != trimmed(customerID) {
             DemoSession.signIn(trimmed(customerID))
         }
         return true
+    }
+
+    /// Something@something.tld — enough to catch a slip; the issuer is the real check.
+    private func isPlausibleEmail(_ value: String) -> Bool {
+        value.range(of: #"^[^@\s]+@[^@\s]+\.[^@\s]+$"#, options: .regularExpression) != nil
     }
 
     /// The display name of the currently selected bank (for the stored card record).
@@ -172,7 +186,7 @@ struct AddCardView: View {
             let response = try await VeyraWallet.shared.tokenisation.verifyAccount(
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
-                walletAccountID: user.emailAddress,
+                walletAccountID: trimmed(email),
                 accountHolderName: trimmed(accountName),
                 accountNumberSource: "MANUAL" // the account number was keyed in by the user
             )
@@ -197,9 +211,9 @@ struct AddCardView: View {
             let r = try await VeyraWallet.shared.tokenisation.digitise(
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
-                walletAccountID: user.emailAddress,
+                walletAccountID: trimmed(email),
                 accountHolderName: trimmed(accountName),
-                emailAddress: user.emailAddress,
+                emailAddress: trimmed(email),
                 recommendation: .approve,
                 mobileNumber: user.mobileNumber,
                 bvn: trimmed(bvn),

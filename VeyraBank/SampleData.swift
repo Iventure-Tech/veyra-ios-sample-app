@@ -58,7 +58,6 @@ struct SampleMerchant {
     }
 }
 
-/// Typed access point for the demo identities.
 /// The app's own login session. Who is logged in is the banking app's to remember, never the
 /// SDK's: the SDKs are told on every launch (configure) and forget on signOut.
 enum DemoSession {
@@ -95,6 +94,7 @@ enum DemoSession {
     }
 }
 
+/// Typed access point for the demo identities.
 enum SampleData {
     /// The demo customers this app can sign in to the SDKs — two, so Home can show a switch.
     static let customerIDs = ["demo-customer-1", "demo-customer-2"]

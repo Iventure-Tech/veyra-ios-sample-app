@@ -168,6 +168,11 @@ struct ShowToPayView: View {
             // The card must go online before a payment QR can be produced.
             errorMessage = message
             phase = .amountEntry
+        } catch VeyraWalletError.deviceNotBound {
+            // The card was added on another device, or before this app was reinstalled, and will
+            // never be given payment keys here. Neither going online nor a smaller amount helps.
+            errorMessage = "This card can't pay on this phone — remove it and add it again on this phone"
+            phase = .amountEntry
         } catch {
             errorMessage = error.localizedDescription
             phase = .amountEntry

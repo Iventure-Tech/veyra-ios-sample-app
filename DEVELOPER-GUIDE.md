@@ -706,7 +706,7 @@ let r = try await VeyraWallet.shared.tokenisation.digitise(
     bvn: bvn,
     accountHolderAddress: address,
     accountNumberSource: "MANUAL",
-    consumerIdentifier: UUID().uuidString,
+    consumerIdentifier: customerID,              // your stable id for this customer
     deviceScore: .trusted,
     accountScore: .highlyTrusted,
     recommendationReasons: [.goodActivityHistory],

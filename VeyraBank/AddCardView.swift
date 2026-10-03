@@ -1,6 +1,8 @@
 // Add a card: choose your bank, check account eligibility, digitise —
 // reached from the wallet
-// screen's `+`. Prefill comes from SampleData — never hardcode demo values in a view.
+// screen's `+`. Prefill comes from SampleData and the signed-in customer — never hardcode demo
+// values in a view. Customer id, account name and BVN are editable, and what is entered is
+// what is sent.
 import SwiftUI
 import VeyraSDK
 import VeyraWallet
@@ -19,6 +21,11 @@ struct AddCardView: View {
     @State private var banksState: BanksState = .loading
     @State private var accountNumber: String
     @State private var selectedInstitutionCode: String
+    // Who is adding the card, as entered on this form (pre-filled, editable). The customer id is
+    // signed in to the SDKs and sent as the consumer id.
+    @State private var customerID: String
+    @State private var accountName: String
+    @State private var bvn: String
     @State private var eligibility: String?
     @State private var eligibilityError: String?
     @State private var checking = false
@@ -26,10 +33,14 @@ struct AddCardView: View {
     @State private var digitiseResult: String?
     @State private var digitiseSucceeded = false
     @State private var digitiseError: String?
+    @State private var formError: String?
 
     init() {
         _accountNumber = State(initialValue: SampleData.personal.accountNumber)
         _selectedInstitutionCode = State(initialValue: SampleData.personal.institutionCode)
+        _customerID = State(initialValue: DemoSession.customerID)
+        _accountName = State(initialValue: SampleData.personal.accountName)
+        _bvn = State(initialValue: SampleData.personal.bvn)
     }
 
     var body: some View {
@@ -37,7 +48,16 @@ struct AddCardView: View {
             Section("Account") {
                 TextField("Account number", text: $accountNumber)
                     .keyboardType(.numberPad)
-                LabeledRow("Account name", value: user.accountName)
+                TextField("Customer ID", text: $customerID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Account name", text: $accountName)
+                    .textInputAutocapitalization(.words)
+                TextField("BVN", text: $bvn)
+                    .keyboardType(.numberPad)
+                if let formError {
+                    Text(formError).font(.footnote).foregroundStyle(Brand.crimson)
+                }
                 // Bank is a picker loaded from the SDK's banks lookup — not a static code.
                 switch banksState {
                 case .loading:
@@ -100,6 +120,22 @@ struct AddCardView: View {
         .task { await loadBanks() }
     }
 
+    private func trimmed(_ value: String) -> String { value.trimmingCharacters(in: .whitespaces) }
+
+    /// Checks the identity fields and signs in the customer they name. The card belongs to that
+    /// customer, so if someone else is signed in the SDKs switch first. False (with a message on
+    /// the form) when a field is blank; nothing is sent then.
+    private func signInEnteredCustomer() -> Bool {
+        formError = nil
+        if trimmed(customerID).isEmpty { formError = "Enter the customer ID"; return false }
+        if trimmed(accountName).isEmpty { formError = "Enter the account name"; return false }
+        if trimmed(bvn).isEmpty { formError = "Enter the BVN"; return false }
+        if !DemoSession.isSignedIn || DemoSession.customerID != trimmed(customerID) {
+            DemoSession.signIn(trimmed(customerID))
+        }
+        return true
+    }
+
     /// The display name of the currently selected bank (for the stored card record).
     private var selectedBankName: String? {
         if case .loaded(let banks) = banksState {
@@ -127,6 +163,7 @@ struct AddCardView: View {
     }
 
     private func checkEligibility() async {
+        guard signInEnteredCustomer() else { return }
         checking = true
         defer { checking = false }
         eligibility = nil
@@ -136,7 +173,7 @@ struct AddCardView: View {
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
                 walletAccountID: user.emailAddress,
-                accountHolderName: user.accountName,
+                accountHolderName: trimmed(accountName),
                 accountNumberSource: "MANUAL" // the account number was keyed in by the user
             )
             eligibility = "\(response.responseCode ?? "unknown")\(response.message.map { " — \($0)" } ?? "")"
@@ -146,6 +183,7 @@ struct AddCardView: View {
     }
 
     private func digitise() async {
+        guard signInEnteredCustomer() else { return }
         digitising = true
         defer { digitising = false }
         digitiseResult = nil
@@ -153,20 +191,21 @@ struct AddCardView: View {
         digitiseError = nil
         do {
             // Business inputs the wallet provider supplies:
-            // APPROVE + TRUSTED/HIGHLY_TRUSTED + GOOD_ACTIVITY_HISTORY, MANUAL entry, UUID
-            // consumer identifier. These are the app's calls to make — the SDK never assumes them.
+            // APPROVE + TRUSTED/HIGHLY_TRUSTED + GOOD_ACTIVITY_HISTORY, MANUAL entry, and the
+            // entered customer id as the consumer identifier. These are the app's calls to make —
+            // the SDK never assumes them.
             let r = try await VeyraWallet.shared.tokenisation.digitise(
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
                 walletAccountID: user.emailAddress,
-                accountHolderName: user.accountName,
+                accountHolderName: trimmed(accountName),
                 emailAddress: user.emailAddress,
                 recommendation: .approve,
                 mobileNumber: user.mobileNumber,
-                bvn: user.bvn,
+                bvn: trimmed(bvn),
                 accountHolderAddress: user.fullAddress,
                 accountNumberSource: "MANUAL",
-                consumerIdentifier: UUID().uuidString,
+                consumerIdentifier: trimmed(customerID),
                 deviceScore: .trusted,
                 accountScore: .highlyTrusted,
                 recommendationReasons: [.goodActivityHistory],

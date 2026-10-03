@@ -548,7 +548,12 @@ struct GetPaidView: View {
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
-        let session = VeyraSoftPOS.shared.tap.session(amountMinorUnits: amountMinorUnits ?? 0) { event in
+        let session = VeyraSoftPOS.shared.tap.session(
+            amountMinorUnits: amountMinorUnits ?? 0,
+            // Your own order id — optional, never a lookup key, and safe to repeat across
+            // attempts of one sale. The transaction reference is the SDK's to mint.
+            merchantOrderID: SampleData.nextOrderID()
+        ) { event in
             switch event {
             case .cardDetected:
                 tapState = .dialogue

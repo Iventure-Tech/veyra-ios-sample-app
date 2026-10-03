@@ -374,7 +374,10 @@ let status = try await VeyraSoftPOS.shared.merchant.update(
 Arm the reader for one sale and wait for the customer's tap. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only real outcomes (approved / declined / pending / failed) end the payment.
 
 ```swift
-let session = VeyraSoftPOS.shared.tap.session(amountMinorUnits: 32500) { event in
+let session = VeyraSoftPOS.shared.tap.session(
+    amountMinorUnits: 32500,
+    merchantOrderID: "ORDER-1042"   // optional — your own order id, never a key
+) { event in
     switch event {
     case .cardDetected:
         // customer's phone connected — "hold steady"
@@ -412,7 +415,7 @@ do {
 session.cancel()
 ```
 
-`session(amountMinorUnits:currencyCode:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`). Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult` carries the outcome in full: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` — the kernel's own), the backend-stated triple `responseCode` / `responseStatus` / `responseStatusReason`, `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`, `sdkErrorCode`, plus `creditTransactionID` + `isCreditConfirmationSupported` on an approved sale — the cue to show the "confirming credit" wait and flip it from `transactions.onCreditConfirmation`.
+`session(amountMinorUnits:currencyCode:merchantOrderID:onEvent:)` — `currencyCode` is ISO 4217 numeric (`Int32`, default `566`); `merchantOrderID` is your own order id (optional, default `nil`), stored with the transaction and returned on both sides' history. Create one session per waiting screen; always `cancel()` on leave. `TapPaymentResult` carries the outcome in full: `status` (`"APPROVED"` / `"DECLINED"` / `"PENDING"` / `"FAILED"` — the kernel's own), the backend-stated triple `responseCode` / `responseStatus` / `responseStatusReason`, `reference` (pass to `transactions.receipt(forReference:)`), `pan`, `cardholderName` (EMV tag `5F20` as the card presented it), `errorMessage`, `sdkErrorCode`, plus `creditTransactionID` + `isCreditConfirmationSupported` on an approved sale — the cue to show the "confirming credit" wait and flip it from `transactions.onCreditConfirmation`.
 
 **Branch on `responseStatus`, display `responseCode`.** `status` is what the EMV run did; `responseStatus` is what the *payment* is, as stated by the backend, and only `APPROVED` / `DECLINED` / `FAILED` are final. `responseStatus` is `nil` against a backend that predates the field and `"Unknown"` for a value newer than this build — treat either as unresolved, never as a refusal. `responseStatusReason` is a plain string to display and log, never to parse.
 
@@ -493,7 +496,7 @@ do {
 
 `CustomerQrChargeOutcome`: `approved: Bool`, `responseCode`, `transactionID`, `reference`, plus `creditTransactionID` + `isCreditConfirmationSupported` (populated on approved charges — the cue to wait for credit confirmation, see `transactions.creditConfirmation`).
 
-> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: optional, echoed back, never validated for uniqueness and never used as a key, so the same value may sit on two attempts of one sale — which is exactly what links a retry to its order. Both `createContext` and `chargeCustomerQr` take it; the tap session does not.
+> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: optional, echoed back, never validated for uniqueness and never used as a key, so the same value may sit on two attempts of one sale — which is exactly what links a retry to its order. `createContext`, `chargeCustomerQr` and `tap.session` all take it.
 
 ---
 

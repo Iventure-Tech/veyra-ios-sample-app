@@ -277,6 +277,7 @@ The sample app shows the pattern on its Home screen: a customer bar with **Switc
 | `VeyraSoftPOS.configure(_:)` | `VeyraSoftPOS.configure(_:customerID:)` |
 | — | `signOut()` on `VeyraSDK`, `VeyraWallet` and `VeyraSoftPOS` — call it when the customer logs out |
 | — | New error cases `VeyraWalletError.notSignedIn` and `VeyraSoftPOSError.notSignedIn` — handle them wherever you switch over those enums |
+| `merchantOrderID: String? = nil` on `chargeCustomerQr` / `createContext`; `tap.session` took none | **Required** on every merchant payment: `tap.session(amountMinorUnits:merchantOrderID:onEvent:)`, `chargeCustomerQr(_:merchantOrderID:)`, `createContext(…merchantOrderID:)`. A blank one throws the new `VeyraSoftPOSError.invalidRequest` before anything is sent (for the tap, from `start()`). |
 | `VeyraWallet.shared.tokenisation.wipeAll()` | **Removed.** Call `signOut()` when a customer logs out; uninstalling the app clears everything. |
 | `VeyraSoftPOS.shared.merchant.clearStored()` | **Removed.** A successful registration overwrites the stored merchant. |
 | Observers survive for the life of the process | Observers are dropped on a customer switch and on `signOut()` — register them again after `configure` |

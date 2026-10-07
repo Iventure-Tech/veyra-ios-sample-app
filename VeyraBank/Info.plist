@@ -28,10 +28,16 @@
 	<dict/>
 	<key>VeyraAppleTeamID</key>
 	<string>$(DEVELOPMENT_TEAM)</string>
+	<key>VeyraBankBackendBaseURL</key>
+	<string>$(VEYRA_BANK_BACKEND_BASE_URL)</string>
+	<key>VeyraBankSessionToken</key>
+	<string>$(VEYRA_BANK_SESSION_TOKEN)</string>
 	<key>VeyraClientID</key>
 	<string>$(VEYRA_CLIENT_ID)</string>
 	<key>VeyraClientSecret</key>
 	<string>$(VEYRA_CLIENT_SECRET)</string>
+	<key>VeyraConnectionMode</key>
+	<string>$(VEYRA_CONNECTION_MODE)</string>
 	<key>VeyraPaymentAppProviderID</key>
 	<string>$(VEYRA_PAYMENT_APP_PROVIDER_ID)</string>
 	<key>VeyraTokenRequestorID</key>

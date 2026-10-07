@@ -2,7 +2,8 @@
 // Demonstrates both roles of a combined integration: Home / Get paid (SoftPOS merchant:
 // tap acceptance, get-paid QR, charge a customer QR) / Pay (wallet: add card, scan-to-pay,
 // show-QR-to-pay, history & receipts). Black + crimson (#C1272D).
-// Credentials and identifiers come from Config/Veyra.xcconfig — see the README for setup.
+// Identifiers and the connection to Veyra (mode + credentials or your bank backend) come from
+// Config/Veyra.xcconfig — see AppConnection and the README for setup.
 import SwiftUI
 import VeyraSDK
 import VeyraSoftPOS
@@ -23,8 +24,6 @@ enum SampleConfig {
         return value
     }
 
-    static let clientID = configValue("VeyraClientID")
-    static let clientSecret = configValue("VeyraClientSecret")
     static let paymentAppProviderID = configValue("VeyraPaymentAppProviderID")
     static let tokenRequestorID = configValue("VeyraTokenRequestorID")
     // payment_application_instance_id is SDK-generated per install — no longer configured here.
@@ -39,20 +38,30 @@ enum SampleConfig {
     static func configureSdks() {
         // Combined app: configure through the umbrella — installs the exclusive-mode arbiter
         // and starts inert (.none).
-        VeyraSDK.configure(
+        do {
+            try configureCombined()
+        } catch {
+            // Invalid connection config is a setup error: fail loudly, naming the field.
+            fatalError("Veyra SDK configuration failed: \(error.localizedDescription)")
+        }
+        // Clearing the SoftPOS merchant on uninstall is the SDK's job (the merchant profile
+        // lives in a sandboxed protected file the OS removes with the app), so no
+        // first-launch wipe is needed here.
+    }
+
+    private static func configureCombined() throws {
+        try VeyraSDK.configure(
             customerID: DemoSession.customerID,
             softpos: .init(
                 environment: .test,
                 // The provider credential the gateway resolves the acquirer id and MCC from —
                 // the same identifier the wallet configuration carries.
                 paymentAppProviderID: paymentAppProviderID,
-                clientID: clientID,
-                clientSecret: clientSecret
+                connection: AppConnection.connection()
             ),
             wallet: .init(
                 environment: .test,
-                clientID: clientID,
-                clientSecret: clientSecret,
+                connection: AppConnection.connection(),
                 paymentAppProviderID: paymentAppProviderID,
                 tokenRequestorID: tokenRequestorID,
                 appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID
@@ -60,9 +69,6 @@ enum SampleConfig {
                 allowedMerchantIDs: allowedMerchantIDs
             )
         )
-        // Clearing the SoftPOS merchant on uninstall is the SDK's job (the merchant profile
-        // lives in a sandboxed protected file the OS removes with the app), so no
-        // first-launch wipe is needed here.
     }
 }
 

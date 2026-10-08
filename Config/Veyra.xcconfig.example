@@ -1,14 +1,37 @@
 // Veyra sample app configuration — copy this file to Veyra.xcconfig (same folder) and
 // fill in the values issued to you during Veyra onboarding, then re-run xcodegen.
-// Veyra.xcconfig is git-ignored; never commit real credentials.
+// Veyra.xcconfig is git-ignored; never commit it: a client secret in a tracked file must be
+// treated as compromised.
 
 // Your Apple Developer Team ID (also used as the App Attest team id).
 DEVELOPMENT_TEAM = YOURTEAMID
 
-// OAuth client credentials (issued by Veyra).
-VEYRA_CLIENT_ID = your-client-id
-VEYRA_CLIENT_SECRET = your-client-secret
-
 // Identifiers assigned to your app at onboarding.
 VEYRA_PAYMENT_APP_PROVIDER_ID = your-payment-app-provider-id
 VEYRA_TOKEN_REQUESTOR_ID = your-token-requestor-id
+
+// ── How both SDKs connect to Veyra ──────────────────────────────────────────────
+// REQUIRED, no default — the app stops at launch until it is set. One of:
+//   directWithAssertion     the SDK calls Veyra with an assertion your bank backend signs
+//                           (needs VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL; your backend
+//                           serves POST /sdk-assertion)
+//   viaAppBackend           the SDK calls nothing itself; every call goes through your bank
+//                           backend (needs VEYRA_BANK_BACKEND_BASE_URL; your backend serves
+//                           POST /veyra-relay/{method})
+//   directWithClientSecret  DEPRECATED — the SDK calls Veyra with a client secret held in the
+//                           app (needs VEYRA_CLIENT_ID + VEYRA_CLIENT_SECRET); retired per provider
+VEYRA_CONNECTION_MODE =
+
+// OAuth client issued by Veyra. Client id: directWithAssertion and directWithClientSecret.
+// Client secret: directWithClientSecret only.
+VEYRA_CLIENT_ID = your-client-id
+VEYRA_CLIENT_SECRET = your-client-secret
+
+// Your bank backend (directWithAssertion and viaAppBackend). xcconfig treats "//" as the start of
+// a comment, so write the scheme separator as /$()/ — e.g. https:/$()/bank-backend.example
+VEYRA_BANK_BACKEND_BASE_URL =
+
+// PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as
+// "Authorization: Bearer <token>"; blank means nobody is signed in. A real app uses its own
+// login session here. This is not a Veyra credential.
+VEYRA_BANK_SESSION_TOKEN = sample-bank-session

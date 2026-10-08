@@ -31,8 +31,9 @@ per-outcome guidance — lives in this repository.
 - Xcode 15+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 - A physical iPhone running iOS 15+ — App Attest and NFC don't work on the simulator.
 - **Veyra onboarding credentials**: artifact-repository username/password (the SDK's binary
-  is hosted on an authenticated server), OAuth client id/secret, payment app provider id,
-  token requestor id — plus your Apple Developer Team ID. The app talks to the Veyra TEST
+  is hosted on an authenticated server), payment app provider id, token requestor id,
+  whatever your [connection mode](#choose-a-connection-mode) needs — plus your Apple
+  Developer Team ID. The app talks to the Veyra TEST
   environment.
 - The test account details from your onboarding pack (the prefill identity in
   `VeyraBank/SampleData.swift` is a placeholder — digitisation is checked against the
@@ -61,6 +62,9 @@ per-outcome guidance — lives in this repository.
    # edit Config/Veyra.xcconfig
    ```
 
+   Set `VEYRA_CONNECTION_MODE` — there is no default, and the app stops at launch until it is
+   set (see [Choose a connection mode](#choose-a-connection-mode)).
+
 4. Optionally update `VeyraBank/SampleData.swift` with your test account details so the
    forms prefill usefully.
 5. Generate the project and open it:
@@ -76,11 +80,39 @@ The SDK resolves as a Swift package from
 `https://github.com/Iventure-Tech/veyra-sdk-ios` at a pinned version; its binary downloads
 from the Veyra artifact server using your `~/.netrc` credentials — no local files.
 
+## Choose a connection mode
+
+Both SDKs need a `connection` — how they reach Veyra. The sample uses one mode for both, read
+from `VEYRA_CONNECTION_MODE` in `Config/Veyra.xcconfig`:
+
+| Mode | What it needs | Your bank backend serves |
+|---|---|---|
+| `directWithAssertion` (recommended) | `VEYRA_CLIENT_ID`, `VEYRA_BANK_BACKEND_BASE_URL` | `POST /sdk-assertion` `{"jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `viaAppBackend` | `VEYRA_BANK_BACKEND_BASE_URL` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
+| `directWithClientSecret` (**deprecated**) | `VEYRA_CLIENT_ID`, `VEYRA_CLIENT_SECRET` | nothing — the secret sits in the app, which is why this mode is being retired |
+
+xcconfig reads `//` as a comment, so write the backend URL as `https:/$()/your-backend.example`.
+`VEYRA_BANK_SESSION_TOKEN` is a **placeholder** for your app's own login session, sent to your
+bank backend as a bearer token. The two callbacks that call your backend are in
+`VeyraBank/AppConnection.swift` — short, and meant to be copied. The relay is called from the SDK's
+background work too, not only from screens. The full contract — the assertion's claims, the relay
+envelope, and how a relay reports a failure — is in
+[Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
+
+> **Upgrading from SDK 2.x?** Each configuration now takes a required `connection:` instead of
+> `clientID:` / `clientSecret:`, and `configure` throws. Staying on client credentials is a
+> one-line change — `connection: .directWithClientSecret(clientId: clientID, clientSecret: clientSecret)`
+> — plus `try`. See [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An
+> existing `Config/Veyra.xcconfig` keeps its keys; add `VEYRA_CONNECTION_MODE` (and the
+> bank-backend values for the backend modes) from `Config/Veyra.xcconfig.example`, then re-run
+> `xcodegen`.
+
 ## Where things are
 
 | Path | What it shows |
 |---|---|
 | `VeyraBank/VeyraBankApp.swift` | SDK configuration & initialisation (both SDKs via the combined facade), Home |
+| `VeyraBank/AppConnection.swift` | The connection to Veyra: mode selection, the assertion provider and the relay that call your bank backend |
 | `VeyraBank/GetPaidView.swift` | The merchant (Get paid) flow — all three acceptance rails |
 | `VeyraBank/PayView.swift` + `AddCardView` / `ScanToPayView` / `ShowToPayView` | The wallet (Pay) flow |
 | `VeyraBank/TransactionsView.swift` + `TransactionDetailView` | Wallet history & receipts |

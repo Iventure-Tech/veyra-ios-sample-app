@@ -36,8 +36,6 @@
 	<string>$(VEYRA_CLIENT_ID)</string>
 	<key>VeyraClientSecret</key>
 	<string>$(VEYRA_CLIENT_SECRET)</string>
-	<key>VeyraConnectionMode</key>
-	<string>$(VEYRA_CONNECTION_MODE)</string>
 	<key>VeyraPaymentAppProviderID</key>
 	<string>$(VEYRA_PAYMENT_APP_PROVIDER_ID)</string>
 	<key>VeyraTokenRequestorID</key>

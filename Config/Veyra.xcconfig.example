@@ -10,27 +10,22 @@ DEVELOPMENT_TEAM = YOURTEAMID
 VEYRA_PAYMENT_APP_PROVIDER_ID = your-payment-app-provider-id
 VEYRA_TOKEN_REQUESTOR_ID = your-token-requestor-id
 
-// ── Which provider both SDKs use ────────────────────────────────────────────────
-// REQUIRED — the app stops at launch without it. This template sets directWithClientSecret
-// (the deprecated VeyraClientSecretProvider) so the sample runs against Veyra with just the
-// client id and secret from your onboarding pack — FOR TESTING ONLY. A real app uses
-// directWithAssertion or viaAppBackend. One of:
-//   directWithAssertion     the SDK calls Veyra with an assertion your bank backend signs
-//                           (needs VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL; your backend
-//                           serves POST /sdk-assertion)
-//   viaAppBackend           the SDK calls nothing itself; every call goes through your bank
-//                           backend (needs VEYRA_BANK_BACKEND_BASE_URL; your backend serves
-//                           POST /veyra-relay/{method})
-//   directWithClientSecret  DEPRECATED — the SDK calls Veyra with a client secret held in the
-//                           app (needs VEYRA_CLIENT_ID + VEYRA_CLIENT_SECRET); retired per provider
-VEYRA_CONNECTION_MODE = directWithClientSecret
+// ── The values for the provider both SDKs use ───────────────────────────────────
+// There is no mode to set: the SDK works out how to reach Veyra from the provider the app passes.
+// Which one the sample builds is chosen in code, in AppConnection.provider(). It ships with the
+// deprecated client-secret provider so the sample runs with just the client id and secret from
+// your onboarding pack — FOR TESTING ONLY. Each provider reads only its own values:
+//   assertion provider      VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL (your backend serves
+//                           POST /sdk-assertion)
+//   proxy provider          VEYRA_BANK_BACKEND_BASE_URL (your backend serves POST /veyra-relay/{method})
+//   client-secret provider  DEPRECATED — VEYRA_CLIENT_ID + VEYRA_CLIENT_SECRET held in the app
 
-// OAuth client issued by Veyra. Client id: directWithAssertion and directWithClientSecret.
-// Client secret: directWithClientSecret only.
+// OAuth client issued by Veyra. Client id: the assertion and client-secret providers.
+// Client secret: the client-secret provider only.
 VEYRA_CLIENT_ID = your-client-id
 VEYRA_CLIENT_SECRET = your-client-secret
 
-// Your bank backend (directWithAssertion and viaAppBackend). xcconfig treats "//" as the start of
+// Your bank backend (the assertion and proxy providers). xcconfig treats "//" as the start of
 // a comment, so write the scheme separator as /$()/ — e.g. https:/$()/bank-backend.example
 VEYRA_BANK_BACKEND_BASE_URL =
 

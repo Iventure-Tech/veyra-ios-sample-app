@@ -45,7 +45,6 @@ targets:
         com.apple.developer.nfc.readersession.iso7816.select-identifiers:
           - "A000000891010104"
         # Injected from Config/Veyra.xcconfig; read by SampleConfig / AppConnection at launch.
-        VeyraConnectionMode: $(VEYRA_CONNECTION_MODE)
         VeyraClientID: $(VEYRA_CLIENT_ID)
         VeyraClientSecret: $(VEYRA_CLIENT_SECRET)
         VeyraBankBackendBaseURL: $(VEYRA_BANK_BACKEND_BASE_URL)

@@ -245,13 +245,14 @@ do {
 //                  try VeyraWallet.configure(walletConfig, customerID:, provider:)
 ```
 
-The sample reads the kind from `Config/Veyra.xcconfig` (`VEYRA_CONNECTION_MODE`:
-`directWithAssertion` for its `VeyraAssertionProvider`, `viaAppBackend` for its `VeyraProxyProvider`;
-required — the app stops at launch without it) and builds the provider in
-`VeyraBank/AppConnection.swift`. Its two providers, `BankBackendAssertionProvider` and
-`BankBackendRelay`, are short and meant to be copied. Each mode reads only its own settings: `directWithAssertion` needs the client id and your backend URL, `viaAppBackend` only your backend URL, and `directWithClientSecret` only the client id and secret. The template `Config/Veyra.xcconfig.example`
-ships with `directWithClientSecret`, the sample's `ClientSecretCredentials` — a
-`VeyraClientSecretProvider` **for testing only**, so the sample runs before your backend has either
+The sample has no mode setting either: `AppConnection.provider()` in
+`VeyraBank/AppConnection.swift` returns one provider, and to switch you return a different one —
+exactly what your own app does. Its two backend providers, `BankBackendAssertionProvider` and
+`BankBackendRelay`, are short and meant to be copied; each reads only its own values from
+`Config/Veyra.xcconfig` (the assertion provider: `VEYRA_CLIENT_ID` and
+`VEYRA_BANK_BACKEND_BASE_URL`; the proxy provider: `VEYRA_BANK_BACKEND_BASE_URL`). The sample ships
+returning `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs
+just `VEYRA_CLIENT_ID` and `VEYRA_CLIENT_SECRET` — so it runs before your backend has either
 endpoint.
 
 ### Your bank backend — the two endpoints the sample calls

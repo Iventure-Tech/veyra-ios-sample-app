@@ -168,9 +168,7 @@ as the payment app provider. `VeyraProvider`, `VeyraAssertionProvider`, `VeyraPr
 | `VeyraProxyProvider` | `.requestProcessor` | calls **nothing** itself: every call is handed to your provider, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
 **The protocol you conform to is the method.** Each protocol supplies its `providerType` by default,
-so you never set a mode: the SDK reads it from the provider you pass. The deprecated
-`VeyraClientSecretProvider` exists only so apps already on client credentials keep working until
-their cut-over date; don't build a new integration on it.
+so you never set a mode: the SDK reads it from the provider you pass.
 
 Rules that hold for every provider:
 
@@ -374,12 +372,6 @@ read or forge either; it **can** read account and identity fields, and it could 
 such as a transaction status. That is acceptable only because you, the provider, already hold that
 data. **Forward the bytes unmodified.** The SDK's log export does not go through your provider.
 
-### `VeyraClientSecretProvider` is deprecated
-
-It exists only so apps already on client credentials keep working until their cut-over date; it is
-retired per payment app provider. Don't build a new integration on it: a client secret inside an
-app can be extracted. Conform to `VeyraAssertionProvider` or `VeyraProxyProvider`.
-
 ---
 
 ## Configuration
@@ -486,42 +478,6 @@ VeyraSDK.signOut()
 - **Uninstalling the app** removes every customer's data. There is no API to wipe the device for all customers.
 
 The sample app shows the pattern on its Home screen: a customer bar with **Switch** (signs in the other demo customer), **Sign out** and **Sign in**, with the wallet and get-paid tiles disabled while signed out.
-
----
-
-## Migrating from 2.x to 3.0.0
-
-3.0.0 makes **how the SDK reaches Veyra** an explicit, required choice: one provider you pass to
-`configure` — see [Connecting to Veyra](#connecting-to-veyra). The breaking changes:
-
-| 2.x | 3.0.0 |
-|---|---|
-| `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:clientID:clientSecret:)` | `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:)` |
-| `VeyraWalletConfiguration(environment:clientID:clientSecret:paymentAppProviderID:…)` | `VeyraWalletConfiguration(environment:paymentAppProviderID:…)` |
-| `configure(customerID:softpos:wallet:)`, `configure(_:customerID:)` | `configure(customerID:provider:softpos:wallet:)`, `configure(_:customerID:provider:)` — one provider, shared by both SDKs |
-| `VeyraSDK.configure`, `VeyraSoftPOS.configure`, `VeyraWallet.configure` | **Now `throws`** — call them with `try` |
-| — | New error cases `.notAuthenticated(message:)` (the SDK could not obtain credentials, so nothing was sent) and `.invalidConfiguration(message:)` on `VeyraWalletError` and `VeyraSoftPOSError` — handle them wherever you switch over those enums |
-
-Replace the client id and secret with a provider, and add `try`. Either your backend signs an
-assertion for the signed-in user (`VeyraAssertionProvider`), or every call goes through your backend
-(`VeyraProxyProvider`):
-
-```swift
-// 2.x
-VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id,
-                             clientID: clientID, clientSecret: clientSecret), customerID: customer)
-
-// 3.0.0
-try VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id),
-                           customerID: customer,
-                           provider: MyAssertionProvider(bank: bankAPI))   // or MyProxyProvider(bank: bankAPI)
-```
-
-Each needs one endpoint on your backend; see
-[Your bank backend](#your-bank-backend--the-two-endpoints-the-sample-calls). Apps still on 2.x keep
-working while you migrate.
-
----
 
 ---
 
@@ -1592,7 +1548,7 @@ log shows underneath.
 | Code | Raised when | What to do |
 |---|---|---|
 | `MERCHANT_REGISTRATION_NETWORK_ERROR` | Registration could not reach the backend | Retry when connected; nothing was created. |
-| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | A `401`/`403` here is almost always wrong client credentials (the deprecated `VeyraClientSecretProvider`); a `4xx` on registration means the profile was refused — show the message. |
+| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | A `401`/`403` here is almost always wrong client credentials; a `4xx` on registration means the profile was refused — show the message. |
 | `MERCHANT_REGISTRATION_PARSE_ERROR` | The registration response could not be parsed | Retry; if it persists the merchant may in fact be registered — refresh the status before registering again. |
 | `ISSUER_NETWORK_ERROR` | The OAuth token fetch failed at transport level | Retry when connected. The authenticated call never started. |
 

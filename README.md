@@ -103,12 +103,6 @@ background work too, not only from screens. The full contract — the assertion'
 envelope, and how a proxy provider reports a failure — is in
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
 
-> **Upgrading from SDK 2.x?** The configurations no longer take `clientID:` / `clientSecret:`;
-> `configure` takes one provider instead — a `VeyraAssertionProvider` (recommended) or a
-> `VeyraProxyProvider` — and throws, so call it with `try`. See [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An
-> existing `Config/Veyra.xcconfig` keeps its keys; add the bank-backend values from
-> `Config/Veyra.xcconfig.example` if you switch to a backend provider, then re-run `xcodegen`.
-
 ## Where things are
 
 | Path | What it shows |

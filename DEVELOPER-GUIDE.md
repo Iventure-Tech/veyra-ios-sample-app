@@ -260,7 +260,8 @@ and the SDK reports `NOT_AUTHENTICATED`.
 | `acr` | The authentication level of the user's session, from the values agreed at onboarding | Needed only if Veyra sets a minimum level for your issuer, e.g. to require multi-factor sign-in. Below the minimum, the assertion is refused |
 | `nbf` | A not-before time | Honoured if present |
 
-Any other claim is ignored.
+**Only the required claims above are mandatory.** `cnf.jkt`, `acr` and `nbf` are optional: include
+`acr` only if Veyra has agreed a minimum sign-in level for your issuer. Any other claim is ignored.
 
 **Device binding between your app and your backend is optional.** You don't have to bind the
 assertion to the device, either with `cnf.jkt` or by using DPoP on your own `/sdk-assertion`

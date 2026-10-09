@@ -21,7 +21,7 @@ Building for Android? See the Android guide in the Android sample repo: https://
 
 A combined app is always in exactly one **mode** — none, receiving (SoftPOS) or paying (Wallet). The mode switches **implicitly** with your payment activity — the SDK claims it when a tap session or wallet payment starts and releases it when they finish; see [Exclusive mode](#exclusive-mode-combined-apps).
 
-Everything the SDK keeps on the device belongs to **one customer** — the one your app has signed in. You tell the SDK who that is every time you configure it, and call `signOut()` when they log out; see [Customers: signing in, signing out, switching](#customers-signing-in-signing-out-switching). Upgrading from 1.x? See [Migrating from 1.x to 2.0.0](#migrating-from-1x-to-200).
+Everything the SDK keeps on the device belongs to **one customer** — the one your app has signed in. You tell the SDK who that is every time you configure it, and call `signOut()` when they log out; see [Customers: signing in, signing out, switching](#customers-signing-in-signing-out-switching).
 
 > **iOS note:** tap **acceptance** on iPhone reads the customer's Android Veyra wallet over CoreNFC. Tap-to-**pay** (card emulation) is not available on iOS — Apple restricts card emulation — so the iOS wallet pays by QR (scan-to-pay and show-QR-to-pay).
 
@@ -96,7 +96,7 @@ The package includes a prebuilt binary that Xcode downloads and checksum-verifie
 ### `VeyraSDK` (combined apps)
 
 ```swift
-try VeyraSDK.configure(customerID: signedInCustomer, softpos: softposConfig, wallet: walletConfig)
+try VeyraSDK.configure(customerID: signedInCustomer, provider: provider, softpos: softposConfig, wallet: walletConfig)
 
 // when the customer logs out:
 VeyraSDK.signOut()
@@ -106,7 +106,7 @@ VeyraSDK.signOut()
 
 | Member | Parameters | Description |
 |--------|------------|-------------|
-| `configure(customerID:softpos:wallet:)` | The signed-in customer's id + both member configurations | **Throws** (`.invalidConfiguration(message:)` from either member when its `connection` is unusable). Configures both SDKs for that customer, plus the exclusive-mode arbiter. **Call at every launch** — the SDK never remembers who is signed in. The process starts **inert**; safe to call again (reconfigures, stays inert). A different customer stops the previous customer's work in both SDKs. `customerID` must not be blank and never leaves the device. |
+| `configure(customerID:provider:softpos:wallet:)` | The signed-in customer's id, your one provider (shared by both SDKs — see [Connecting to Veyra](#connecting-to-veyra)) and both member configurations | **Throws** (`.invalidConfiguration(message:)` when the provider is unusable). Configures both SDKs for that customer, plus the exclusive-mode arbiter. **Call at every launch** — the SDK never remembers who is signed in. The process starts **inert**; safe to call again (reconfigures, stays inert). A different customer stops the previous customer's work in both SDKs. `customerID` must not be blank and never leaves the device. |
 | `signOut()` | — | Static. The customer has logged out: both member SDKs stop everything they run for them and drop every observer registration. Their cards, merchant and history stay on the device for when they sign in again. |
 | `shared` | — | The singleton. |
 | `currentMode` | — | The current exclusive mode (`VeyraMode.none` / `.softpos` / `.wallet`). Read-only observation for UI state — the mode itself is entirely SDK-managed. |
@@ -117,7 +117,7 @@ In a standalone single-product app (only `VeyraSoftPOS` *or* only `VeyraWallet`)
 
 ```swift
 // standalone; combined apps configure via VeyraSDK
-try VeyraSoftPOS.configure(configuration, customerID: signedInCustomer)
+try VeyraSoftPOS.configure(configuration, customerID: signedInCustomer, provider: provider)
 let merchant = VeyraSoftPOS.shared.merchant
 ```
 
@@ -125,7 +125,7 @@ let merchant = VeyraSoftPOS.shared.merchant
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:customerID:)` | Configure the SDK for the customer your app has signed in. **Throws** `VeyraSoftPOSError.invalidConfiguration` when the `connection` is unusable or differs from the mode already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). The merchant and its transactions are kept per customer: the same customer again changes nothing; a different customer stops the previous customer's watches and opens the new customer's merchant. `customerID` must not be blank and never leaves the device. |
+| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraSoftPOSError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). The merchant and its transactions are kept per customer: the same customer again changes nothing; a different customer stops the previous customer's watches and opens the new customer's merchant. `customerID` must not be blank and never leaves the device. |
 | `signOut()` | Static. The customer has logged out: stops every merchant watch and drops every observer registration. Their merchant and transactions stay on the device. Until the next `configure` every call throws `VeyraSoftPOSError.notSignedIn`. |
 | `shared` | The singleton. |
 | `merchant` | Merchant lifecycle — registration, status, activate/deactivate, profile update, banks, stored merchant, and `onMerchantStatusChanged` (the SDK watches the merchant's backend status for you). |
@@ -137,7 +137,7 @@ let merchant = VeyraSoftPOS.shared.merchant
 
 ```swift
 // standalone; combined apps configure via VeyraSDK
-try VeyraWallet.configure(configuration, customerID: signedInCustomer)
+try VeyraWallet.configure(configuration, customerID: signedInCustomer, provider: provider)
 let tokenisation = VeyraWallet.shared.tokenisation
 ```
 
@@ -145,7 +145,7 @@ let tokenisation = VeyraWallet.shared.tokenisation
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:customerID:)` | Configure the SDK for the customer your app has signed in. **Throws** `VeyraWalletError.invalidConfiguration` when the `connection` is unusable or differs from the mode already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). Cards, keys, history and receipts are kept per customer: the same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. `customerID` must not be blank and never leaves the device. |
+| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraWalletError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). Cards, keys, history and receipts are kept per customer: the same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. `customerID` must not be blank and never leaves the device. |
 | `signOut()` | Static. The customer has logged out: stops everything the wallet runs for them (key top-ups, status syncs, history sweeps) and drops every observer registration. Their cards, keys, history and receipts stay on the device. Until the next `configure` every call throws `VeyraWalletError.notSignedIn`. |
 | `shared` | The singleton. |
 | `tokenisation` | The wallet service — bank lookup, eligibility, digitise, activation, cards, payments, history, receipts. |
@@ -155,82 +155,120 @@ let tokenisation = VeyraWallet.shared.tokenisation
 
 ## Connecting to Veyra
 
-Both configurations take a **required** `connection: VeyraConnection`. It says how the SDK reaches
-the Veyra backend. There is **no default** and the SDK never infers one: which mode you use is your
-decision as the payment app provider. `VeyraConnection`, `VeyraBackendRelay` and `VeyraRelayError`
-come with `import VeyraWallet` / `import VeyraSoftPOS`.
+You pass **one provider** to `configure`, and it says how the SDK reaches the Veyra backend. The
+same provider serves both SDKs. There is **no default**: which kind you implement is your decision
+as the payment app provider. `VeyraProvider`, `VeyraAuthProvider`, `VeyraProxyProvider`,
+`VeyraProviderType` and `VeyraRelayError` come with `import VeyraWallet` / `import VeyraSoftPOS`.
 
-### Choosing a connection mode
+### Choosing a provider
 
-| Mode | The SDK… | Choose it when |
-|---|---|---|
-| `.directWithAssertion` | calls Veyra itself, with a token it obtains by exchanging a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the logged-in user (recommended) |
-| `.viaAppBackend` | calls **nothing** itself: every call is handed to your app, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
-| `.directWithClientSecret` *(deprecated)* | calls Veyra itself with a client id and secret held in the app | only until your cut-over date — a secret inside an app can be extracted |
+| Provider | `providerType` | The SDK… | Choose it when |
+|---|---|---|---|
+| `VeyraAuthProvider` | `.authentication` | calls Veyra itself, with a token it obtains by exchanging a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the logged-in user (recommended) |
+| `VeyraProxyProvider` | `.requestProcessor` | calls **nothing** itself: every call is handed to your provider, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
-Rules that hold for every mode:
+**The protocol you conform to is the method.** Each protocol supplies its `providerType` by default,
+so you never set a mode: the SDK reads it from the provider you pass. The deprecated
+`VeyraClientSecretProvider` exists only so apps already on client credentials keep working until
+their cut-over date; don't build a new integration on it.
 
-- **`configure` throws.** An unusable connection (a blank `clientId` or `clientSecret`) fails there
-  with `.invalidConfiguration(message:)` naming the field — never at the first payment.
-- **One mode per SDK for the life of the process, with no fallback.** A `.directWithAssertion` SDK
-  whose provider returns nothing fails with `.notAuthenticated`; it never tries another mode.
-  Configuring again with a different mode throws `.invalidConfiguration`.
-- **The SoftPOS and wallet SDKs choose independently**; each keeps its own tokens.
-- **Every `configure` re-binds the connection** — the provider or relay you pass is the one the SDK
-  uses from then on, including from its own background work.
+Rules that hold for every provider:
+
+- **One provider for both SDKs.** `VeyraSDK.configure` passes it to both; a standalone app passes
+  it to the one SDK it uses. Each SDK still keeps its own token cache and device key.
+- **`configure` throws** `.invalidConfiguration(message:)`, naming the problem, for: a type that
+  conforms to both protocols; a `providerType` that contradicts the protocol it conforms to; and a
+  blank `clientId` — never at the first payment. (Swift also makes a type that conforms to both
+  pick its own `providerType`, because the two defaults clash.)
+- **One kind per process, with no fallback.** A `VeyraAuthProvider` whose `assertion` returns `nil`
+  fails with `.notAuthenticated`; the SDK never tries another method. Configuring again with the
+  other kind throws `.invalidConfiguration`.
+- **Every `configure` re-binds the provider** — the one you pass is the one the SDK uses from then
+  on, including from its own background work.
 - **A call is never sent without credentials.** When the SDK cannot obtain a token, the call throws
   `VeyraWalletError.notAuthenticated` / `VeyraSoftPOSError.notAuthenticated` and nothing is sent.
 - Every backend call (token requests included) carries `X-Veyra-Sdk-Version` and
-  `X-Veyra-Connection` (`DIRECT_CLIENT_SECRET`, `DIRECT_ASSERTION` or `VIA_APP_BACKEND`).
+  `X-Veyra-Connection` (`DIRECT_ASSERTION`, `VIA_APP_BACKEND` or `DIRECT_CLIENT_SECRET`).
 
-### Configuring each mode — wallet and SoftPOS
+### Implementing a provider
+
+**`VeyraAuthProvider`** — your client id, and one function that gets an assertion from your
+backend. The SDK calls it only when it needs a new token:
 
 ```swift
-// .directWithAssertion (recommended)
-let connection: VeyraConnection = .directWithAssertion(clientId: "your-client-id") { jkt, audience in
-    try await myBankAPI.sdkAssertion(jkt: jkt, audience: audience)   // POST {your backend}/sdk-assertion — JWT or nil
+struct MyAuthProvider: VeyraAuthProvider {
+    let clientId = "your-client-id"                    // public, issued at onboarding
+    let bank: MyBankAPI
+
+    /// A JWT from your backend for the signed-in user, or nil when nobody is signed in.
+    func assertion(audience: String, jkt: String) async throws -> String? {
+        try await bank.sdkAssertion(audience: audience, jkt: jkt)   // POST {your backend}/sdk-assertion
+    }
 }
+```
 
-// .viaAppBackend
-let connection: VeyraConnection = .viaAppBackend(relay: MyRelay())
+**`VeyraProxyProvider`** — five functions, one per HTTP method. The SDK calls them for every
+backend call:
 
-// .directWithClientSecret (deprecated)
-let connection: VeyraConnection = .directWithClientSecret(clientId: "your-client-id",
-                                                          clientSecret: "your-client-secret")
+```swift
+struct MyProxyProvider: VeyraProxyProvider {
+    let bank: MyBankAPI
 
-// Then, whichever mode — combined app:
+    func post(_ request: String) async throws -> String { try await bank.veyraProxy("post", request) }
+    func get(_ request: String) async throws -> String { try await bank.veyraProxy("get", request) }
+    func put(_ request: String) async throws -> String { try await bank.veyraProxy("put", request) }
+    func delete(_ request: String) async throws -> String { try await bank.veyraProxy("delete", request) }
+    func patch(_ request: String) async throws -> String { try await bank.veyraProxy("patch", request) }
+}
+```
+
+`bank.veyraProxy` sends the envelope to `POST {your backend}/veyra-relay/{method}` and returns
+Veyra's body unchanged. On failure it throws `VeyraRelayError`, saying whether the request was sent
+— see [the failure contract](#the-proxy-providers-failure-contract).
+
+### Configuring with your provider
+
+```swift
+let provider = MyAuthProvider(bank: bankAPI)          // or MyProxyProvider(bank: bankAPI)
+
 do {
     try VeyraSDK.configure(
         customerID: signedInCustomer,
-        softpos: .init(environment: .test, paymentAppProviderID: providerID, connection: connection),
-        wallet: .init(environment: .test, connection: connection, paymentAppProviderID: providerID,
+        provider: provider,
+        softpos: .init(environment: .test, paymentAppProviderID: providerID),
+        wallet: .init(environment: .test, paymentAppProviderID: providerID,
                       tokenRequestorID: requestorID, appleTeamID: teamID))
 } catch {
-    // .invalidConfiguration(message:) names the field — a setup error, fix the configuration.
+    // .invalidConfiguration(message:) names the problem — a setup error, fix the provider.
 }
-// …or standalone: try VeyraSoftPOS.configure(softposConfig, customerID:) / try VeyraWallet.configure(walletConfig, customerID:)
+// …or standalone: try VeyraSoftPOS.configure(softposConfig, customerID:, provider:)
+//                  try VeyraWallet.configure(walletConfig, customerID:, provider:)
 ```
 
-The sample reads the mode from `Config/Veyra.xcconfig` (`VEYRA_CONNECTION_MODE`, no default — the
-app stops at launch until it is set) and builds the connection in `VeyraBank/AppConnection.swift`.
-Its two callbacks, `BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be
-copied.
+The sample reads the kind from `Config/Veyra.xcconfig` (`VEYRA_CONNECTION_MODE`:
+`directWithAssertion` for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`;
+required — the app stops at launch without it) and builds the provider in
+`VeyraBank/AppConnection.swift`. Its two providers, `BankBackendAssertionProvider` and
+`BankBackendRelay`, are short and meant to be copied. The template `Config/Veyra.xcconfig.example`
+ships with `directWithClientSecret`, the sample's `ClientSecretCredentials` — a
+`VeyraClientSecretProvider` **for testing only**, so the sample runs before your backend has either
+endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
-`.directWithAssertion` and `.viaAppBackend` each need one endpoint on **your** backend. Both are
+`VeyraAuthProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both are
 authenticated with your app's **own** session (the sample sends a placeholder bearer token from
 `Config/Veyra.xcconfig` — replace it with your login session); neither is a Veyra credential.
 
 ```
-POST {your backend}/sdk-assertion                          (.directWithAssertion)
-     {"jkt": "<jkt>", "audience": "<audience>"}
+POST {your backend}/sdk-assertion                          (VeyraAuthProvider)
+     {"audience": "<audience>", "jkt": "<jkt>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns nil)
 
-POST {your backend}/veyra-relay/{post|get|put|delete|patch} (.viaAppBackend)
+POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
      body: the SDK's envelope, unchanged
-  →  your backend authenticates to Veyra with its own client-credentials token (held
-     server-side), sends path + query + headers + body to the Veyra API unmodified, and
+  →  your backend authenticates to Veyra with its own OAuth client-credentials token (held
+     server-side; an API key is not accepted), sends path + query + headers + body to the Veyra API unmodified, and
      answers with Veyra's status and body unchanged
 ```
 
@@ -283,8 +321,9 @@ and cannot be exported (Secure Enclave). Returning `nil` or throwing fails the c
 sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
 refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
-**`/veyra-relay/{method}` forwards the envelope (version 1, public API).** Each relay `request` is
-one JSON string; the relay method called is the HTTP method your backend uses towards Veyra:
+**`/veyra-relay/{method}` forwards the envelope (version 1, public API).** Each `request` your
+proxy provider receives is one JSON string; the function called is the HTTP method your backend
+uses towards Veyra:
 
 ```json
 { "v": 1,
@@ -303,9 +342,9 @@ one JSON string; the relay method called is the HTTP method your backend uses to
   status, throw `VeyraRelayError(kind: .other, neverSent: false, httpStatus: status)` rather than
   inventing a body — the SDK treats it exactly as that status on a direct connection.
 
-### The relay failure contract
+### The proxy provider's failure contract
 
-A relay signals failure by throwing `VeyraRelayError(kind:neverSent:httpStatus:)`, and **must say
+A proxy provider signals failure by throwing `VeyraRelayError(kind:neverSent:httpStatus:)`, and **must say
 whether the request was sent**:
 
 - `neverSent: true` **only** when the request provably never left the device — no network, or the
@@ -315,7 +354,7 @@ whether the request was sent**:
   answer, or whenever you cannot tell. The payment stays `PENDING` and the SDK reconciles it. **When
   in doubt, `false`**: it is the safe direction.
 - `httpStatus` when your backend answered with a non-2xx status.
-- **Any other error** counts as `neverSent: false`, and so does a relay call that outlives the SDK's
+- **Any other error** counts as `neverSent: false`, and so does a call that outlives the SDK's
   own timeout.
 
 The sample's `BankBackendRelay.classify` is the reference: `.notConnectedToInternet`,
@@ -323,23 +362,22 @@ The sample's `BankBackendRelay.classify` is the reference: `.notConnectedToInter
 never sent; `.cannotConnectToHost` → `.connectionRefused`, never sent; `.timedOut` → `.timeout`, may
 have been sent; anything else → `.other`, may have been sent.
 
-**Your relay is called from background work too** — status polling, payment-key refresh and credit
+**Your proxy provider is called from background work too** — status polling, payment-key refresh and credit
 confirmations run on the SDK's app-scoped loops — so it must not depend on a screen being up (the
-sample's relay is a plain struct with no view reference). Before your app has configured the SDK
-there is no relay, and those cycles skip without failing.
+sample's is a plain struct with no view reference). Before your app has configured the SDK
+there is no provider, and those cycles skip without failing.
 
-**What the relay can see.** Request and response bodies pass through your app and backend. Key
-material is end-to-end encrypted to the device and payment proofs are MACed, so the relay cannot
+**What your backend can see.** Request and response bodies pass through your app and backend. Key
+material is end-to-end encrypted to the device and payment proofs are MACed, so your backend cannot
 read or forge either; it **can** read account and identity fields, and it could alter plain answers
 such as a transaction status. That is acceptable only because you, the provider, already hold that
-data. **Forward the bytes unmodified.** The SDK's log export does not go through the relay.
+data. **Forward the bytes unmodified.** The SDK's log export does not go through your provider.
 
-### `.directWithClientSecret` is deprecated
+### `VeyraClientSecretProvider` is deprecated
 
-It works exactly as in 2.x on the wire and keeps working until your cut-over date; it is retired
-per provider. A client secret inside an app can be extracted — move to `.directWithAssertion` or
-`.viaAppBackend`, and never commit a secret to source control (the sample keeps it in the
-git-ignored `Config/Veyra.xcconfig`).
+It exists only so apps already on client credentials keep working until their cut-over date; it is
+retired per payment app provider. Don't build a new integration on it: a client secret inside an
+app can be extracted. Conform to `VeyraAuthProvider` or `VeyraProxyProvider`.
 
 ---
 
@@ -356,8 +394,7 @@ git-ignored `Config/Veyra.xcconfig`).
 ```swift
 let softposConfig = VeyraSoftPOSConfiguration(
     environment: .test,
-    paymentAppProviderID: "your-payment-app-provider-id",
-    connection: connection   // required — see Connecting to Veyra
+    paymentAppProviderID: "your-payment-app-provider-id"
 )
 ```
 
@@ -367,14 +404,12 @@ let softposConfig = VeyraSoftPOSConfiguration(
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults — no URLs to supply. |
 | `paymentAppProviderID` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet configuration's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. |
-| `connection` | **Mandatory** | How the SDK reaches Veyra: `.directWithAssertion`, `.viaAppBackend` or (deprecated) `.directWithClientSecret`. No default — see [Connecting to Veyra](#connecting-to-veyra). |
 
 ### `VeyraWalletConfiguration`
 
 ```swift
 let walletConfig = VeyraWalletConfiguration(
     environment: .test,
-    connection: connection,  // required — see Connecting to Veyra
     paymentAppProviderID: "your-provider-id",
     tokenRequestorID: "50100000001",
     appVersion: "1.2.0",
@@ -389,7 +424,6 @@ let walletConfig = VeyraWalletConfiguration(
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults. |
-| `connection` | **Mandatory** | How the SDK reaches Veyra — see [Connecting to Veyra](#connecting-to-veyra). An unusable one makes `configure` throw `.invalidConfiguration` naming the field. |
 | `paymentAppProviderID` | **Mandatory for wallet operations** | Your payment-app provider identifier (eligibility/digitise fail without it). |
 | `tokenRequestorID` | **Mandatory for wallet operations** | Scheme-assigned token requestor ID. |
 | `appleTeamID` | **Mandatory** | Your app's Apple Developer Team ID (e.g. `"ABCDE12345"`). Together with the bundle ID it forms the App Attest app ID (`teamID.bundleID`) that device attestation binds to and the backend verifies — it attests **your** app, so this is your team, not Veyra's. Digitise fails fast if missing. |
@@ -405,8 +439,8 @@ One shared enum for both products (nested `Environment` on each configuration).
 
 | Value | Description |
 |-------|-------------|
-| `.test` | Test / staging servers. A `connection` is required. |
-| `.live` | Production servers. A `connection` is required. |
+| `.test` | Test / staging servers. A provider is required at `configure`. |
+| `.live` | Production servers. A provider is required at `configure`. |
 
 Server hosts and endpoint paths are resolved by the SDK from the environment — you never supply URLs.
 
@@ -435,7 +469,7 @@ The SDK keeps **everything per customer**: the wallet's cards, payment keys, his
 
 ```swift
 // At every launch, once your app knows who is logged in:
-try VeyraSDK.configure(customerID: session.customerID, softpos: softposConfig, wallet: walletConfig)
+try VeyraSDK.configure(customerID: session.customerID, provider: provider, softpos: softposConfig, wallet: walletConfig)
 registerObservers()            // observers belong to the signed-in customer
 
 // When the customer logs out:
@@ -456,51 +490,37 @@ The sample app shows the pattern on its Home screen: a customer bar with **Switc
 
 ## Migrating from 2.x to 3.0.0
 
-3.0.0 makes **how the SDK reaches Veyra** an explicit, required choice — see
-[Connecting to Veyra](#connecting-to-veyra). The breaking changes:
+3.0.0 makes **how the SDK reaches Veyra** an explicit, required choice: one provider you pass to
+`configure` — see [Connecting to Veyra](#connecting-to-veyra). The breaking changes:
 
 | 2.x | 3.0.0 |
 |---|---|
-| `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:clientID:clientSecret:)` | `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:connection:)` |
-| `VeyraWalletConfiguration(environment:clientID:clientSecret:paymentAppProviderID:…)` | `VeyraWalletConfiguration(environment:connection:paymentAppProviderID:…)` — `connection:` right after `environment:` |
+| `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:clientID:clientSecret:)` | `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:)` |
+| `VeyraWalletConfiguration(environment:clientID:clientSecret:paymentAppProviderID:…)` | `VeyraWalletConfiguration(environment:paymentAppProviderID:…)` |
+| `configure(customerID:softpos:wallet:)`, `configure(_:customerID:)` | `configure(customerID:provider:softpos:wallet:)`, `configure(_:customerID:provider:)` — one provider, shared by both SDKs |
 | `VeyraSDK.configure`, `VeyraSoftPOS.configure`, `VeyraWallet.configure` | **Now `throws`** — call them with `try` |
 | — | New error cases `.notAuthenticated(message:)` (the SDK could not obtain credentials, so nothing was sent) and `.invalidConfiguration(message:)` on `VeyraWalletError` and `VeyraSoftPOSError` — handle them wherever you switch over those enums |
 
-Staying on client credentials is a one-line change, plus `try`:
+Replace the client id and secret with a provider, and add `try`. Either your backend signs an
+assertion for the signed-in user (`VeyraAuthProvider`), or every call goes through your backend
+(`VeyraProxyProvider`):
 
 ```swift
 // 2.x
 VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id,
                              clientID: clientID, clientSecret: clientSecret), customerID: customer)
+
 // 3.0.0
-try VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id,
-                                 connection: .directWithClientSecret(clientId: clientID, clientSecret: clientSecret)),
-                           customerID: customer)
+try VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id),
+                           customerID: customer,
+                           provider: MyAuthProvider(bank: bankAPI))   // or MyProxyProvider(bank: bankAPI)
 ```
 
-`.directWithClientSecret` is **deprecated** — it keeps working until your cut-over date, and then you
-move to `.directWithAssertion` or `.viaAppBackend`. On the wire it is unchanged, so apps on 2.x keep
+Each needs one endpoint on your backend; see
+[Your bank backend](#your-bank-backend--the-two-endpoints-the-sample-calls). Apps still on 2.x keep
 working while you migrate.
 
 ---
-
-## Migrating from 1.x to 2.0.0
-
-2.0.0 makes the SDK customer-aware. The breaking changes:
-
-| 1.x | 2.0.0 |
-|---|---|
-| `VeyraSDK.configure(softpos:wallet:)` | `VeyraSDK.configure(customerID:softpos:wallet:)` |
-| `VeyraWallet.configure(_:)` | `VeyraWallet.configure(_:customerID:)` |
-| `VeyraSoftPOS.configure(_:)` | `VeyraSoftPOS.configure(_:customerID:)` |
-| — | `signOut()` on `VeyraSDK`, `VeyraWallet` and `VeyraSoftPOS` — call it when the customer logs out |
-| — | New error cases `VeyraWalletError.notSignedIn` and `VeyraSoftPOSError.notSignedIn` — handle them wherever you switch over those enums |
-| `merchantOrderID: String? = nil` on `chargeCustomerQr` / `createContext`; `tap.session` took none | **Required** on every merchant payment: `tap.session(amountMinorUnits:merchantOrderID:onEvent:)`, `chargeCustomerQr(_:merchantOrderID:)`, `createContext(…merchantOrderID:)`. A blank one throws the new `VeyraSoftPOSError.invalidRequest` before anything is sent (for the tap, from `start()`). |
-| `VeyraWallet.shared.tokenisation.wipeAll()` | **Removed.** Call `signOut()` when a customer logs out; uninstalling the app clears everything. |
-| `VeyraSoftPOS.shared.merchant.clearStored()` | **Removed.** A successful registration overwrites the stored merchant. |
-| Observers survive for the life of the process | Observers are dropped on a customer switch and on `signOut()` — register them again after `configure` |
-
-**Data from before 2.0.0 is erased, not migrated.** It belonged to no particular customer, so on the first launch of 2.0.0 the SDK deletes it rather than hand it to whoever signs in first. Your customers add their cards again, and merchants register again.
 
 ---
 
@@ -1426,8 +1446,8 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | | `.amountExceedsCardLimit(message)` | The amount is larger than this card can carry in one payment — refused **before** any payment/QR is built | Offer a smaller amount or another card. Unlike `.onlineRequired` this does **not** clear by going online: the per-payment limit is provisioned with the card. |
 | | `.deviceNotBound(message)` | The card was added on a different device (or on this phone before the app was reinstalled), so the backend will not issue it payment keys — refused **before** any payment/QR is built | Tell the user to remove the card and **add it again on this phone** — the only remedy. Going online does not help, and neither does a smaller amount. Pre-empt it: the card already shows `deviceNotBound == true` — grey it out. Clears only when the card is removed. |
 | | `.tokenNotActive(message)` | The card's server-side status is not active (e.g. suspended by the issuer) — **no payment was attempted** | Tell the user the card is suspended/inactive. Don't retry locally — payments resume automatically once a status sync sees the card active again. |
-| | `.notAuthenticated(message)` | **Any** wallet backend call when the SDK could not obtain credentials — your assertion provider returned `nil` or threw, or the token endpoint refused the client. Nothing was sent | Under `.directWithAssertion` this usually means nobody is signed in to your app: send the user to sign-in, then retry. The SDK never falls back to another connection mode. |
-| | `.invalidConfiguration(message)` | `configure` with an unusable `connection` (a blank `clientId` / `clientSecret`), or a different connection mode than this process already uses | A setup error: fix the configuration. `message` names the field. |
+| | `.notAuthenticated(message)` | **Any** wallet backend call when the SDK could not obtain credentials — your `VeyraAuthProvider.assertion` returned `nil` or threw, or the token endpoint refused the client. Nothing was sent | With a `VeyraAuthProvider` this usually means nobody is signed in to your app: send the user to sign-in, then retry. The SDK never falls back to another connection mode. |
+| | `.invalidConfiguration(message)` | `configure` with an unusable provider (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`), or a different kind of provider than this process already uses | A setup error: fix the configuration. `message` names the field. |
 | | `.noNetworkConnection(message)` | **Any** wallet backend call — get banks, verify account, digitise, request activation code, activate, check token active, get token status — on a device with no working internet connection | Ask the user to connect and try again. Nothing was sent, so nothing needs undoing. |
 | | `.unrecognisedResponseCode(message)` | Digitisation answered with a response code this SDK version does not recognise, so the token was **discarded** — nothing provisioned, no card added, even when the response carried complete token data | Show the message and offer a retry; update the Veyra SDK if it persists. `message` quotes the raw code for support. A token whose terms the SDK cannot interpret is never installed on a guess. |
 | | `.requestFailed(message)` | Everything else (network, backend, invalid input) | Show `error.localizedDescription` — every case carries its underlying message. |
@@ -1435,11 +1455,11 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | | `.notSignedIn` | Any call after `signOut()` and before the next `configure(_:customerID:)` | Send the user to your sign-in; configure with the customer once they are back. |
 | | `.tapRefused(message)` | Arming the tap reader was refused — the wallet's payment is mid-flight (combined apps) | "Finish or cancel the current payment first." Never occurs in a SoftPOS-only app. |
 | | `.invalidRequest(message)` | A call refused **before anything was sent** because an argument is invalid — e.g. a blank `merchantOrderID` on `tap.session` (thrown by `start()`), `chargeCustomerQr` or `createContext` | Fix the call. There is no payment, response code or transaction to look up. Android reports the same as `SdkErrorCode.INVALID_REQUEST`. |
-| | `.notAuthenticated(message)` | **Any** SoftPOS backend call when the SDK could not obtain credentials — your assertion provider returned `nil` or threw, or the token endpoint refused the client. Nothing was sent: no response code, nothing recorded | Under `.directWithAssertion` this usually means nobody is signed in: send the user to sign-in, then retry. Android reports the same as `SdkErrorCode.NOT_AUTHENTICATED`. |
-| | `.invalidConfiguration(message)` | `configure` with an unusable `connection`, or a different connection mode than this process already uses | A setup error: fix the configuration. `message` names the field. |
+| | `.notAuthenticated(message)` | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAuthProvider.assertion` returned `nil` or threw, or the token endpoint refused the client. Nothing was sent: no response code, nothing recorded | With a `VeyraAuthProvider` this usually means nobody is signed in: send the user to sign-in, then retry. Android reports the same as `SdkErrorCode.NOT_AUTHENTICATED`. |
+| | `.invalidConfiguration(message)` | `configure` with an unusable provider, or a different kind of provider than this process already uses | A setup error: fix the configuration. `message` names the field. |
 | | `.noNetworkConnection(message)` | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — on a device with no working internet connection | Ask the merchant to connect and try again. Nothing reached the gateway; no transaction was recorded. |
 | | `.requestFailed(message)` | Backend/network failure | Show the message; offer retry. |
-| `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(customerID:softpos:wallet:)` | Configure at launch. |
+| `VeyraSDKError` | `.notConfigured` | Combined facade used before `VeyraSDK.configure(customerID:provider:softpos:wallet:)` | Configure at launch. |
 
 These refusals are also available as an observer, registered **per card**:
 
@@ -1497,8 +1517,8 @@ unfamiliar one as a decline.
 | Code | Meaning | What to do |
 |---|---|---|
 | `NO_NETWORK_CONNECTION` | The merchant's device has no working internet connection — DNS never resolved, or there is no usable network. Nothing reached the gateway | "Connect to the internet and try again." Nothing was charged, nothing is polling, nothing to reconcile. Not the same as `91` (reached the network, refused) or the wallet's `.onlineRequired` (a *card* state). |
-| `NOT_AUTHENTICATED` | The SDK could not obtain credentials — the assertion provider returned `nil` or threw, or the token endpoint refused the client. Nothing was sent | Under `.directWithAssertion` usually nobody is signed in: send the user to sign-in, then retry. Also thrown as `VeyraSoftPOSError.notAuthenticated`. |
-| `MISSING_MANDATORY_CONFIG` | A required configuration value is absent — environment, a usable connection, terminal or merchant id | An integration bug, not a user-facing error. Fix `VeyraSoftPOSConfiguration`, or register the merchant (which supplies terminal/merchant ids). |
+| `NOT_AUTHENTICATED` | The SDK could not obtain credentials — the `VeyraAuthProvider.assertion` returned `nil` or threw, or the token endpoint refused the client. Nothing was sent | With a `VeyraAuthProvider` usually nobody is signed in: send the user to sign-in, then retry. Also thrown as `VeyraSoftPOSError.notAuthenticated`. |
+| `MISSING_MANDATORY_CONFIG` | A required configuration value is absent — environment, a usable provider, terminal or merchant id | An integration bug, not a user-facing error. Fix `VeyraSoftPOSConfiguration`, or register the merchant (which supplies terminal/merchant ids). |
 
 #### 2. Card-read failures — "unknown card, tap again"
 
@@ -1571,7 +1591,7 @@ log shows underneath.
 | Code | Raised when | What to do |
 |---|---|---|
 | `MERCHANT_REGISTRATION_NETWORK_ERROR` | Registration could not reach the backend | Retry when connected; nothing was created. |
-| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | A `401`/`403` here is almost always wrong client credentials (`.directWithClientSecret`); a `4xx` on registration means the profile was refused — show the message. |
+| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | A `401`/`403` here is almost always wrong client credentials (the deprecated `VeyraClientSecretProvider`); a `4xx` on registration means the profile was refused — show the message. |
 | `MERCHANT_REGISTRATION_PARSE_ERROR` | The registration response could not be parsed | Retry; if it persists the merchant may in fact be registered — refresh the status before registering again. |
 | `ISSUER_NETWORK_ERROR` | The OAuth token fetch failed at transport level | Retry when connected. The authenticated call never started. |
 

@@ -132,7 +132,9 @@ struct BankBackendRelay: VeyraProxyProvider {
     }
 }
 
-/// The deprecated client-secret provider, kept selectable until the cut-over date.
+/// The deprecated client-secret provider — **for testing only**, e.g. against UAT before your bank
+/// backend can sign assertions. A secret inside an app can be extracted: ship a
+/// `BankBackendAssertionProvider` or `BankBackendRelay` instead.
 @available(*, deprecated, message: "directWithClientSecret is deprecated: move to directWithAssertion or viaAppBackend.")
 struct ClientSecretCredentials: VeyraClientSecretProvider {
     let clientId: String

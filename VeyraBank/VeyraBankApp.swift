@@ -52,16 +52,15 @@ enum SampleConfig {
     private static func configureCombined() throws {
         try VeyraSDK.configure(
             customerID: DemoSession.customerID,
+            provider: AppConnection.provider(),
             softpos: .init(
                 environment: .test,
                 // The provider credential the gateway resolves the acquirer id and MCC from —
                 // the same identifier the wallet configuration carries.
-                paymentAppProviderID: paymentAppProviderID,
-                connection: AppConnection.connection()
+                paymentAppProviderID: paymentAppProviderID
             ),
             wallet: .init(
                 environment: .test,
-                connection: AppConnection.connection(),
                 paymentAppProviderID: paymentAppProviderID,
                 tokenRequestorID: tokenRequestorID,
                 appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID

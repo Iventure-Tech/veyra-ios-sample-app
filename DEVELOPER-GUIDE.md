@@ -187,8 +187,8 @@ Rules that hold for every mode:
 
 ```swift
 // .directWithAssertion (recommended)
-let connection: VeyraConnection = .directWithAssertion(clientId: "your-client-id") { jkt in
-    try await myBankAPI.sdkAssertion(jkt: jkt)   // POST {your backend}/sdk-assertion — JWT or nil
+let connection: VeyraConnection = .directWithAssertion(clientId: "your-client-id") { jkt, audience in
+    try await myBankAPI.sdkAssertion(jkt: jkt, audience: audience)   // POST {your backend}/sdk-assertion — JWT or nil
 }
 
 // .viaAppBackend
@@ -224,7 +224,7 @@ authenticated with your app's **own** session (the sample sends a placeholder be
 
 ```
 POST {your backend}/sdk-assertion                          (.directWithAssertion)
-     {"jkt": "<jkt>"}
+     {"jkt": "<jkt>", "audience": "<audience>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns nil)
 
 POST {your backend}/veyra-relay/{post|get|put|delete|patch} (.viaAppBackend)
@@ -236,15 +236,40 @@ POST {your backend}/veyra-relay/{post|get|put|delete|patch} (.viaAppBackend)
 
 **`/sdk-assertion` signs** a compact JWT, with the signing key held in an HSM or KMS:
 
-| Claim | Value |
-|---|---|
-| `iss` | your issuer, as registered with Veyra |
-| `sub` | the signed-in user: stable and pairwise — never an account number or customer id |
-| `aud` | Veyra's token issuer, as agreed at onboarding |
-| `iat`, `exp` | issued-at and expiry; `exp` at most **5 minutes** after `iat` |
-| `jti` | unique per assertion |
-| `acr` | the authentication level of the user's session |
-| `cnf.jkt` | exactly the `jkt` the SDK passed in |
+**Required by Veyra — the minimum.** How you produce the assertion is up to you: your own
+endpoint, your authorization server's token exchange (RFC 8693), or any identity provider. Veyra
+checks only the following. An assertion that is missing any of them, or fails a check, is refused,
+and the SDK reports `NOT_AUTHENTICATED`.
+
+| Part | What to put in it | Why Veyra needs it |
+|---|---|---|
+| Signature (`alg`) | `ES256`, `ES384`, `PS256` or `RS256` (the ones agreed for your issuer), signed with a private key held in an HSM or KMS. Never `none` or an HMAC (`HS…`) algorithm | Veyra verifies it with your **public** key (your JWKS URI, or keys you registered). That proves the assertion came from you, and Veyra can never create one itself |
+| `kid` (header) | The id of the signing key in your JWKS. It can be left out only if you publish exactly one key | Picks the key to verify with, so you can rotate: publish the new key, then start signing with it |
+| `iss` | Exactly the issuer identifier registered with Veyra, character for character | Tells Veyra whose keys and rules apply. An unknown or disabled issuer is refused |
+| `sub` | A stable, pairwise identifier for the signed-in user: the same value every time for that user. Never an account number, customer id, phone number or email | Veyra derives its own user id from `iss` + `sub`, so the same person is recognised across sessions and devices without you sharing who they are |
+| `aud` | The `audience` the SDK passed to your provider (the Veyra API base URL: `https://api.uat.veyra.co` on `TEST`, `https://api.veyra.co` on `LIVE`), or the alias agreed at onboarding | Addresses the assertion to Veyra only, so no other service that trusts your key can accept it |
+| `iat` | When you issued it, in seconds since the epoch | Must not be in the future (Veyra allows 60 seconds of clock difference). Together with `exp`, it bounds the assertion's life |
+| `exp` | The expiry: at most your agreed maximum after `iat`, which is **5 minutes** unless agreed otherwise | Limits how long a leaked assertion could be used. An expired one is refused |
+| `jti` | A new unique id for every assertion, e.g. a UUID | Veyra accepts each `iss` + `jti` only once, so a captured assertion can't be replayed |
+
+**Optional:**
+
+| Claim | What to put in it | Why |
+|---|---|---|
+| `cnf.jkt` *(recommended)* | Exactly the `jkt` the SDK passed to your provider | Binds the assertion to this device's key. If it's present, Veyra refuses the assertion unless it matches the key the SDK proves it holds, so a leaked assertion is useless on any other device. Veyra can make it mandatory for your issuer if you agree to that |
+| `acr` | The authentication level of the user's session, from the values agreed at onboarding | Needed only if Veyra sets a minimum level for your issuer, e.g. to require multi-factor sign-in. Below the minimum, the assertion is refused |
+| `nbf` | A not-before time | Honoured if present |
+
+**Only the required claims above are mandatory.** `cnf.jkt`, `acr` and `nbf` are optional: include
+`acr` only if Veyra has agreed a minimum sign-in level for your issuer. Any other claim is ignored.
+
+**Device binding between your app and your backend is optional.** You don't have to bind the
+assertion to the device, either with `cnf.jkt` or by using DPoP on your own `/sdk-assertion`
+endpoint. Veyra accepts an unbound assertion that meets the minimum above. Either way, the SDK
+always uses DPoP with Veyra: the access token it gets is bound to a key generated on this device
+that cannot be exported. **What binding adds:** without it, an assertion that leaks in its few
+minutes of life could be redeemed once by another device. With it, it can't be redeemed anywhere
+else.
 
 Issue it only for an authenticated session of the user it names, and rate-limit the endpoint. The
 SDK calls the provider only when it holds no valid token (first call, expiry, or a token the server
@@ -252,6 +277,11 @@ refused), never more than once at a time. `jkt` is the thumbprint of this instal
 proof-of-possession key; the access token is bound to that key, which is generated on the device
 and cannot be exported (Secure Enclave). Returning `nil` or throwing fails the call with
 `.notAuthenticated` and sends nothing. `signOut()` drops cached tokens but keeps the per-install key.
+
+`audience` is the base URL of the Veyra API the SDK will redeem the assertion at
+(`https://api.uat.veyra.co` on `TEST`, `https://api.veyra.co` on `LIVE`). **Check it before you
+sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
+refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
 **`/veyra-relay/{method}` forwards the envelope (version 1, public API).** Each relay `request` is
 one JSON string; the relay method called is the HTTP method your backend uses towards Veyra:

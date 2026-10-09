@@ -1,7 +1,7 @@
-// The provider this app passes to configure — one for both SDKs — chosen in the git-ignored
-// Config/Veyra.xcconfig (copy Config/Veyra.xcconfig.example and fill it in; the build injects the
-// values into Info.plist). Which kind is the app's own decision, so there is no default: an unset
-// or unknown mode stops the app at launch, naming what to set.
+// The provider this app passes to configure — one for both SDKs. There is no mode to configure:
+// the SDK works out how to reach Veyra from the kind of provider it is given, so switching is
+// choosing which provider `provider()` returns. The values each one needs come from the git-ignored
+// Config/Veyra.xcconfig (copy Config/Veyra.xcconfig.example; the build injects them into Info.plist).
 import Foundation
 import VeyraWallet
 
@@ -15,48 +15,43 @@ enum AppConnection {
     /// Stands in for your bank app's own logged-in session when calling your backend.
     static var bankSession: String? { value("VeyraBankSessionToken").isEmpty ? nil : value("VeyraBankSessionToken") }
 
-    /// The provider for both SDKs. Each mode reads only its own settings: the client-secret
-    /// provider never sees the bank backend, and the backend providers never see a secret.
+    /// The provider for both SDKs. There is no mode: the SDK works out how to reach Veyra from
+    /// the kind of provider it is given, so switching is returning a different one here.
+    ///
+    /// Return ONE of the three. The sample ships with the client-secret provider so it runs with
+    /// just your onboarding client id and secret — **for testing only**; a real app returns
+    /// `assertionProvider()` or `proxyProvider()`.
     static func provider() -> any VeyraProvider {
-        switch value("VeyraConnectionMode") {
-        case "directWithAssertion":
-            return assertionProvider()
-        case "viaAppBackend":
-            return proxyProvider()
-        case "directWithClientSecret":
-            return clientSecretProvider()
-        case let mode:
-            fatalError("VEYRA_CONNECTION_MODE is not set (got \"\(mode)\"). Copy Config/Veyra.xcconfig.example to "
-                + "Config/Veyra.xcconfig, choose directWithAssertion, viaAppBackend or directWithClientSecret, "
-                + "then re-run xcodegen.")
-        }
+        clientSecretProvider()
+        // assertionProvider()
+        // proxyProvider()
     }
 
-    /// `directWithAssertion`: your client id, and the bank backend that signs the assertion.
-    private static func assertionProvider() -> any VeyraProvider {
+    /// Your client id, and the bank backend that signs the assertion.
+    static func assertionProvider() -> any VeyraProvider {
         BankBackendAssertionProvider(clientId: value("VeyraClientID"), baseURL: bankBackend(), session: { bankSession })
     }
 
-    /// `viaAppBackend`: only the bank backend that relays the SDK's calls — no client id, no secret.
-    private static func proxyProvider() -> any VeyraProvider {
+    /// Only the bank backend that relays the SDK's calls — no client id, no secret.
+    static func proxyProvider() -> any VeyraProvider {
         BankBackendRelay(baseURL: bankBackend(), session: { bankSession })
     }
 
-    /// `directWithClientSecret` (deprecated, testing only): just the client id and secret.
-    @available(*, deprecated, message: "directWithClientSecret is deprecated: move to directWithAssertion or viaAppBackend.")
-    private static func clientSecretProvider() -> any VeyraProvider {
+    /// Deprecated, testing only: just the client id and secret.
+    @available(*, deprecated, message: "The client-secret provider is deprecated: return assertionProvider() or proxyProvider().")
+    static func clientSecretProvider() -> any VeyraProvider {
         ClientSecretCredentials(clientId: value("VeyraClientID"), clientSecret: value("VeyraClientSecret"))
     }
 
     private static func bankBackend() -> URL {
         guard let url = URL(string: value("VeyraBankBackendBaseURL")), !value("VeyraBankBackendBaseURL").isEmpty else {
-            fatalError("VEYRA_BANK_BACKEND_BASE_URL must be set in Config/Veyra.xcconfig for this connection mode")
+            fatalError("VEYRA_BANK_BACKEND_BASE_URL must be set in Config/Veyra.xcconfig for this provider")
         }
         return url
     }
 }
 
-/// `directWithAssertion`: fetch a short-lived assertion for the signed-in user from **your bank
+/// The assertion provider: fetch a short-lived assertion for the signed-in user from **your bank
 /// backend's endpoint** (`POST {base}/sdk-assertion`). See the integration guide for the minimum
 /// claims — `iss`, `sub`, `aud` equal to the `audience` the SDK passes here, `iat`, `exp` ≤ 5 min
 /// and a unique `jti` — plus the optional `cnf.jkt` (the `jkt` the SDK passes here) and `acr`. Request
@@ -91,7 +86,7 @@ struct BankBackendAssertionProvider: VeyraAssertionProvider {
     }
 }
 
-/// `viaAppBackend`: send every SDK call through **your bank backend**. The SDK's envelope goes,
+/// The proxy provider: send every SDK call through **your bank backend**. The SDK's envelope goes,
 /// unchanged, as the body of `POST {base}/veyra-relay/{method}`; your backend authenticates to
 /// Veyra with its own client-credentials token, forwards path/query/headers/body to the Veyra API
 /// unmodified, and answers with Veyra's response body — returned here unchanged. Called from the
@@ -147,7 +142,7 @@ struct BankBackendRelay: VeyraProxyProvider {
 /// The deprecated client-secret provider — **for testing only**, e.g. against UAT before your bank
 /// backend can sign assertions. A secret inside an app can be extracted: ship a
 /// `BankBackendAssertionProvider` or `BankBackendRelay` instead.
-@available(*, deprecated, message: "directWithClientSecret is deprecated: move to directWithAssertion or viaAppBackend.")
+@available(*, deprecated, message: "The client-secret provider is deprecated: return assertionProvider() or proxyProvider().")
 struct ClientSecretCredentials: VeyraClientSecretProvider {
     let clientId: String
     let clientSecret: String

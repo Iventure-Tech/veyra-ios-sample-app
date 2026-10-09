@@ -246,10 +246,13 @@ do {
 ```
 
 The sample reads the kind from `Config/Veyra.xcconfig` (`VEYRA_CONNECTION_MODE`:
-`directWithAssertion` for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`; no
-default — the app stops at launch until it is set) and builds the provider in
+`directWithAssertion` for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`;
+required — the app stops at launch without it) and builds the provider in
 `VeyraBank/AppConnection.swift`. Its two providers, `BankBackendAssertionProvider` and
-`BankBackendRelay`, are short and meant to be copied.
+`BankBackendRelay`, are short and meant to be copied. The template `Config/Veyra.xcconfig.example`
+ships with `directWithClientSecret`, the sample's `ClientSecretCredentials` — a
+`VeyraClientSecretProvider` **for testing only**, so the sample runs before your backend has either
+endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 

@@ -62,8 +62,11 @@ per-outcome guidance — lives in this repository.
    # edit Config/Veyra.xcconfig
    ```
 
-   Set `VEYRA_CONNECTION_MODE` — there is no default, and the app stops at launch until it is
-   set (see [Choose a provider](#choose-a-provider)).
+   `VEYRA_CONNECTION_MODE` comes set to `directWithClientSecret` — the deprecated
+   `VeyraClientSecretProvider`, **for testing only** — so the sample runs with just your
+   `VEYRA_CLIENT_ID` and `VEYRA_CLIENT_SECRET`. Switch it to `directWithAssertion` or
+   `viaAppBackend` to try the providers a real app ships (see [Choose a provider](#choose-a-provider)).
+   It is required: with it blank the app stops at launch.
 
 4. Optionally update `VeyraBank/SampleData.swift` with your test account details so the
    forms prefill usefully.

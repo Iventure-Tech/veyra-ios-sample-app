@@ -1,8 +1,7 @@
-// How this app connects both SDKs to Veyra, read from the git-ignored Config/Veyra.xcconfig
-// (copy Config/Veyra.xcconfig.example and fill it in; the build injects the values into
-// Info.plist). The connection mode is the app's own decision, so there is no default: an unset or
-// unknown mode stops the app at launch, naming what to set. Both SDKs use the same mode here for
-// simplicity; a real app may choose per SDK.
+// The provider this app passes to configure — one for both SDKs — chosen in the git-ignored
+// Config/Veyra.xcconfig (copy Config/Veyra.xcconfig.example and fill it in; the build injects the
+// values into Info.plist). Which kind is the app's own decision, so there is no default: an unset
+// or unknown mode stops the app at launch, naming what to set.
 import Foundation
 import VeyraWallet
 
@@ -16,18 +15,15 @@ enum AppConnection {
     /// Stands in for your bank app's own logged-in session when calling your backend.
     static var bankSession: String? { value("VeyraBankSessionToken").isEmpty ? nil : value("VeyraBankSessionToken") }
 
-    /// The connection for either SDK.
-    static func connection() -> VeyraConnection {
+    /// The provider for both SDKs.
+    static func provider() -> any VeyraProvider {
         switch value("VeyraConnectionMode") {
         case "directWithClientSecret":
             return deprecatedClientSecret(clientId: value("VeyraClientID"), clientSecret: value("VeyraClientSecret"))
         case "directWithAssertion":
-            let provider = BankBackendAssertionProvider(baseURL: bankBackend(), session: { bankSession })
-            return .directWithAssertion(clientId: value("VeyraClientID"), assertionProvider: { audience, jkt in
-                try await provider.assertion(audience: audience, jkt: jkt)
-            })
+            return BankBackendAssertionProvider(clientId: value("VeyraClientID"), baseURL: bankBackend(), session: { bankSession })
         case "viaAppBackend":
-            return .viaAppBackend(relay: BankBackendRelay(baseURL: bankBackend(), session: { bankSession }))
+            return BankBackendRelay(baseURL: bankBackend(), session: { bankSession })
         case let mode:
             fatalError("VEYRA_CONNECTION_MODE is not set (got \"\(mode)\"). Copy Config/Veyra.xcconfig.example to "
                 + "Config/Veyra.xcconfig, choose directWithClientSecret, directWithAssertion or viaAppBackend, "
@@ -36,8 +32,8 @@ enum AppConnection {
     }
 
     @available(*, deprecated, message: "directWithClientSecret is deprecated: move to directWithAssertion or viaAppBackend.")
-    private static func deprecatedClientSecret(clientId: String, clientSecret: String) -> VeyraConnection {
-        .directWithClientSecret(clientId: clientId, clientSecret: clientSecret)
+    private static func deprecatedClientSecret(clientId: String, clientSecret: String) -> any VeyraProvider {
+        ClientSecretCredentials(clientId: clientId, clientSecret: clientSecret)
     }
 
     private static func bankBackend() -> URL {
@@ -54,7 +50,9 @@ enum AppConnection {
 /// and a unique `jti` — plus the optional `cnf.jkt` (the `jkt` the SDK passes here) and `acr`. Request
 /// `{"audience": …, "jkt": …}` with your app's session; response
 /// `{"assertion": "<compact JWT>"}`. Returns nil when no user is signed in (401).
-struct BankBackendAssertionProvider: Sendable {
+struct BankBackendAssertionProvider: VeyraAuthProvider {
+    /// The OAuth client id Veyra issued to this app (public, not a secret).
+    let clientId: String
     let baseURL: URL
     let session: @Sendable () -> String?
 
@@ -86,7 +84,7 @@ struct BankBackendAssertionProvider: Sendable {
 /// Veyra with its own client-credentials token, forwards path/query/headers/body to the Veyra API
 /// unmodified, and answers with Veyra's response body — returned here unchanged. Called from the
 /// SDK's background work too, so it must not depend on a screen being up.
-struct BankBackendRelay: VeyraBackendRelay {
+struct BankBackendRelay: VeyraProxyProvider {
     let baseURL: URL
     let session: @Sendable () -> String?
 
@@ -132,4 +130,11 @@ struct BankBackendRelay: VeyraBackendRelay {
             return VeyraRelayError(kind: .other, neverSent: false, message: error.localizedDescription)
         }
     }
+}
+
+/// The deprecated client-secret provider, kept selectable until the cut-over date.
+@available(*, deprecated, message: "directWithClientSecret is deprecated: move to directWithAssertion or viaAppBackend.")
+struct ClientSecretCredentials: VeyraClientSecretProvider {
+    let clientId: String
+    let clientSecret: String
 }

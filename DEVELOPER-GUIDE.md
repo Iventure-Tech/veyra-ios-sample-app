@@ -489,42 +489,6 @@ The sample app shows the pattern on its Home screen: a customer bar with **Switc
 
 ---
 
-## Migrating from 2.x to 3.0.0
-
-3.0.0 makes **how the SDK reaches Veyra** an explicit, required choice: one provider you pass to
-`configure` — see [Connecting to Veyra](#connecting-to-veyra). The breaking changes:
-
-| 2.x | 3.0.0 |
-|---|---|
-| `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:clientID:clientSecret:)` | `VeyraSoftPOSConfiguration(environment:paymentAppProviderID:)` |
-| `VeyraWalletConfiguration(environment:clientID:clientSecret:paymentAppProviderID:…)` | `VeyraWalletConfiguration(environment:paymentAppProviderID:…)` |
-| `configure(customerID:softpos:wallet:)`, `configure(_:customerID:)` | `configure(customerID:provider:softpos:wallet:)`, `configure(_:customerID:provider:)` — one provider, shared by both SDKs |
-| `VeyraSDK.configure`, `VeyraSoftPOS.configure`, `VeyraWallet.configure` | **Now `throws`** — call them with `try` |
-| — | New error cases `.notAuthenticated(message:)` (the SDK could not obtain credentials, so nothing was sent) and `.invalidConfiguration(message:)` on `VeyraWalletError` and `VeyraSoftPOSError` — handle them wherever you switch over those enums |
-
-Replace the client id and secret with a provider, and add `try`. Either your backend signs an
-assertion for the signed-in user (`VeyraAssertionProvider`), or every call goes through your backend
-(`VeyraProxyProvider`):
-
-```swift
-// 2.x
-VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id,
-                             clientID: clientID, clientSecret: clientSecret), customerID: customer)
-
-// 3.0.0
-try VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id),
-                           customerID: customer,
-                           provider: MyAssertionProvider(bank: bankAPI))   // or MyProxyProvider(bank: bankAPI)
-```
-
-Each needs one endpoint on your backend; see
-[Your bank backend](#your-bank-backend--the-two-endpoints-the-sample-calls). Apps still on 2.x keep
-working while you migrate.
-
----
-
----
-
 ## SoftPOS — accepting payments
 
 Service accessors: `VeyraSoftPOS.shared.merchant`, `.tap`, `.payments`, `.transactions`. All async methods throw `VeyraSoftPOSError` and deliver events on the main queue.

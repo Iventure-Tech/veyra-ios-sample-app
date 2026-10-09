@@ -21,7 +21,7 @@ Building for Android? See the Android guide in the Android sample repo: https://
 
 A combined app is always in exactly one **mode** — none, receiving (SoftPOS) or paying (Wallet). The mode switches **implicitly** with your payment activity — the SDK claims it when a tap session or wallet payment starts and releases it when they finish; see [Exclusive mode](#exclusive-mode-combined-apps).
 
-Everything the SDK keeps on the device belongs to **one customer** — the one your app has signed in. You tell the SDK who that is every time you configure it, and call `signOut()` when they log out; see [Customers: signing in, signing out, switching](#customers-signing-in-signing-out-switching). Upgrading from 1.x? See [Migrating from 1.x to 2.0.0](#migrating-from-1x-to-200).
+Everything the SDK keeps on the device belongs to **one customer** — the one your app has signed in. You tell the SDK who that is every time you configure it, and call `signOut()` when they log out; see [Customers: signing in, signing out, switching](#customers-signing-in-signing-out-switching).
 
 > **iOS note:** tap **acceptance** on iPhone reads the customer's Android Veyra wallet over CoreNFC. Tap-to-**pay** (card emulation) is not available on iOS — Apple restricts card emulation — so the iOS wallet pays by QR (scan-to-pay and show-QR-to-pay).
 
@@ -187,16 +187,12 @@ Rules that hold for every mode:
 
 ```swift
 // .directWithAssertion (recommended)
-let connection: VeyraConnection = .directWithAssertion(clientId: "your-client-id") { jkt, audience in
-    try await myBankAPI.sdkAssertion(jkt: jkt, audience: audience)   // POST {your backend}/sdk-assertion — JWT or nil
+let connection: VeyraConnection = .directWithAssertion(clientId: "your-client-id") { audience, jkt in
+    try await myBankAPI.sdkAssertion(audience: audience, jkt: jkt)   // POST {your backend}/sdk-assertion — JWT or nil
 }
 
 // .viaAppBackend
 let connection: VeyraConnection = .viaAppBackend(relay: MyRelay())
-
-// .directWithClientSecret (deprecated)
-let connection: VeyraConnection = .directWithClientSecret(clientId: "your-client-id",
-                                                          clientSecret: "your-client-secret")
 
 // Then, whichever mode — combined app:
 do {
@@ -224,7 +220,7 @@ authenticated with your app's **own** session (the sample sends a placeholder be
 
 ```
 POST {your backend}/sdk-assertion                          (.directWithAssertion)
-     {"jkt": "<jkt>", "audience": "<audience>"}
+     {"audience": "<audience>", "jkt": "<jkt>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns nil)
 
 POST {your backend}/veyra-relay/{post|get|put|delete|patch} (.viaAppBackend)
@@ -336,10 +332,9 @@ data. **Forward the bytes unmodified.** The SDK's log export does not go through
 
 ### `.directWithClientSecret` is deprecated
 
-It works exactly as in 2.x on the wire and keeps working until your cut-over date; it is retired
-per provider. A client secret inside an app can be extracted — move to `.directWithAssertion` or
-`.viaAppBackend`, and never commit a secret to source control (the sample keeps it in the
-git-ignored `Config/Veyra.xcconfig`).
+It exists only so apps already on client credentials keep working until their cut-over date; it is
+retired per provider. Don't build a new integration on it: a client secret inside an app can be
+extracted. Use `.directWithAssertion` or `.viaAppBackend`.
 
 ---
 
@@ -466,41 +461,30 @@ The sample app shows the pattern on its Home screen: a customer bar with **Switc
 | `VeyraSDK.configure`, `VeyraSoftPOS.configure`, `VeyraWallet.configure` | **Now `throws`** — call them with `try` |
 | — | New error cases `.notAuthenticated(message:)` (the SDK could not obtain credentials, so nothing was sent) and `.invalidConfiguration(message:)` on `VeyraWalletError` and `VeyraSoftPOSError` — handle them wherever you switch over those enums |
 
-Staying on client credentials is a one-line change, plus `try`:
+Replace the client id and secret with a connection, and add `try`. Either your backend signs an
+assertion for the signed-in user, or every call goes through your backend:
 
 ```swift
 // 2.x
 VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id,
                              clientID: clientID, clientSecret: clientSecret), customerID: customer)
-// 3.0.0
-try VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id,
-                                 connection: .directWithClientSecret(clientId: clientID, clientSecret: clientSecret)),
+
+// 3.0.0 — .directWithAssertion (recommended)
+let connection: VeyraConnection = .directWithAssertion(clientId: "your-client-id") { audience, jkt in
+    try await myBankAPI.sdkAssertion(audience: audience, jkt: jkt)
+}
+// 3.0.0 — or .viaAppBackend
+let connection: VeyraConnection = .viaAppBackend(relay: MyRelay())
+
+try VeyraSoftPOS.configure(.init(environment: .live, paymentAppProviderID: id, connection: connection),
                            customerID: customer)
 ```
 
-`.directWithClientSecret` is **deprecated** — it keeps working until your cut-over date, and then you
-move to `.directWithAssertion` or `.viaAppBackend`. On the wire it is unchanged, so apps on 2.x keep
+Each needs one endpoint on your backend; see
+[Your bank backend](#your-bank-backend--the-two-endpoints-the-sample-calls). Apps still on 2.x keep
 working while you migrate.
 
 ---
-
-## Migrating from 1.x to 2.0.0
-
-2.0.0 makes the SDK customer-aware. The breaking changes:
-
-| 1.x | 2.0.0 |
-|---|---|
-| `VeyraSDK.configure(softpos:wallet:)` | `VeyraSDK.configure(customerID:softpos:wallet:)` |
-| `VeyraWallet.configure(_:)` | `VeyraWallet.configure(_:customerID:)` |
-| `VeyraSoftPOS.configure(_:)` | `VeyraSoftPOS.configure(_:customerID:)` |
-| — | `signOut()` on `VeyraSDK`, `VeyraWallet` and `VeyraSoftPOS` — call it when the customer logs out |
-| — | New error cases `VeyraWalletError.notSignedIn` and `VeyraSoftPOSError.notSignedIn` — handle them wherever you switch over those enums |
-| `merchantOrderID: String? = nil` on `chargeCustomerQr` / `createContext`; `tap.session` took none | **Required** on every merchant payment: `tap.session(amountMinorUnits:merchantOrderID:onEvent:)`, `chargeCustomerQr(_:merchantOrderID:)`, `createContext(…merchantOrderID:)`. A blank one throws the new `VeyraSoftPOSError.invalidRequest` before anything is sent (for the tap, from `start()`). |
-| `VeyraWallet.shared.tokenisation.wipeAll()` | **Removed.** Call `signOut()` when a customer logs out; uninstalling the app clears everything. |
-| `VeyraSoftPOS.shared.merchant.clearStored()` | **Removed.** A successful registration overwrites the stored merchant. |
-| Observers survive for the life of the process | Observers are dropped on a customer switch and on `signOut()` — register them again after `configure` |
-
-**Data from before 2.0.0 is erased, not migrated.** It belonged to no particular customer, so on the first launch of 2.0.0 the SDK deletes it rather than hand it to whoever signs in first. Your customers add their cards again, and merchants register again.
 
 ---
 

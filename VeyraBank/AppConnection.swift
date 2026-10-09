@@ -23,8 +23,8 @@ enum AppConnection {
             return deprecatedClientSecret(clientId: value("VeyraClientID"), clientSecret: value("VeyraClientSecret"))
         case "directWithAssertion":
             let provider = BankBackendAssertionProvider(baseURL: bankBackend(), session: { bankSession })
-            return .directWithAssertion(clientId: value("VeyraClientID"), assertionProvider: { jkt, audience in
-                try await provider.assertion(jkt: jkt, audience: audience)
+            return .directWithAssertion(clientId: value("VeyraClientID"), assertionProvider: { audience, jkt in
+                try await provider.assertion(audience: audience, jkt: jkt)
             })
         case "viaAppBackend":
             return .viaAppBackend(relay: BankBackendRelay(baseURL: bankBackend(), session: { bankSession }))
@@ -52,19 +52,19 @@ enum AppConnection {
 /// backend's endpoint** (`POST {base}/sdk-assertion`). See the integration guide for the minimum
 /// claims — `iss`, `sub`, `aud` equal to the `audience` the SDK passes here, `iat`, `exp` ≤ 5 min
 /// and a unique `jti` — plus the optional `cnf.jkt` (the `jkt` the SDK passes here) and `acr`. Request
-/// `{"jkt": …, "audience": …}` with your app's session; response
+/// `{"audience": …, "jkt": …}` with your app's session; response
 /// `{"assertion": "<compact JWT>"}`. Returns nil when no user is signed in (401).
 struct BankBackendAssertionProvider: Sendable {
     let baseURL: URL
     let session: @Sendable () -> String?
 
-    func assertion(jkt: String, audience: String) async throws -> String? {
+    func assertion(audience: String, jkt: String) async throws -> String? {
         guard let session = session() else { return nil } // logged out
         var request = URLRequest(url: baseURL.appendingPathComponent("sdk-assertion"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(session)", forHTTPHeaderField: "Authorization") // your bank session
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["jkt": jkt, "audience": audience])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["audience": audience, "jkt": jkt])
         let (data, response) = try await URLSession.shared.data(for: request)
         return try Self.parse(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
     }

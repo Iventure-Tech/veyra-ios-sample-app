@@ -87,7 +87,7 @@ from `VEYRA_CONNECTION_MODE` in `Config/Veyra.xcconfig`:
 
 | Mode | What it needs | Your bank backend serves |
 |---|---|---|
-| `directWithAssertion` (recommended) | `VEYRA_CLIENT_ID`, `VEYRA_BANK_BACKEND_BASE_URL` | `POST /sdk-assertion` `{"jkt": …, "audience": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `directWithAssertion` (recommended) | `VEYRA_CLIENT_ID`, `VEYRA_BANK_BACKEND_BASE_URL` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
 | `viaAppBackend` | `VEYRA_BANK_BACKEND_BASE_URL` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `directWithClientSecret` (**deprecated**) | `VEYRA_CLIENT_ID`, `VEYRA_CLIENT_SECRET` | nothing — the secret sits in the app, which is why this mode is being retired |
 
@@ -100,9 +100,8 @@ envelope, and how a relay reports a failure — is in
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
 
 > **Upgrading from SDK 2.x?** Each configuration now takes a required `connection:` instead of
-> `clientID:` / `clientSecret:`, and `configure` throws. Staying on client credentials is a
-> one-line change — `connection: .directWithClientSecret(clientId: clientID, clientSecret: clientSecret)`
-> — plus `try`. See [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An
+> `clientID:` / `clientSecret:`, and `configure` throws: use `.directWithAssertion` (recommended) or
+> `.viaAppBackend`, and call `configure` with `try`. See [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An
 > existing `Config/Veyra.xcconfig` keeps its keys; add `VEYRA_CONNECTION_MODE` (and the
 > bank-backend values for the backend modes) from `Config/Veyra.xcconfig.example`, then re-run
 > `xcodegen`.

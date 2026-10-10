@@ -149,23 +149,25 @@ enum TokenExchangeError: Error, CustomStringConvertible {
     }
 }
 
-/// The proxy provider: send every SDK call through **your bank backend**. The SDK's envelope goes,
-/// unchanged, as the body of `POST {base}/veyra-relay/{method}`; your backend authenticates to
-/// Veyra with its own client-credentials token, forwards path/query/headers/body to the Veyra API
-/// unmodified, and answers with Veyra's response body — returned here unchanged. Called from the
-/// SDK's background work too, so it must not depend on a screen being up.
+/// The proxy provider: send every SDK call through **your bank**. The SDK's envelope —
+/// `{version, service, method, path, query, headers, body}` — goes, unchanged, as the body of
+/// `POST {base}/issuertokengateway/v1`, whichever of the five functions the SDK called: the
+/// envelope already names the method and the Veyra service. Your API gateway checks the app's
+/// session and forwards it to your proxy backend (your ITG), which calls Veyra and answers with
+/// Veyra's response body — returned here unchanged. Called from the SDK's background work too, so
+/// it must not depend on a screen being up.
 struct BankBackendRelay: VeyraProxyProvider {
     let baseURL: URL
     let session: @Sendable () -> String?
 
-    func post(_ request: String) async throws -> String { try await forward("post", request) }
-    func get(_ request: String) async throws -> String { try await forward("get", request) }
-    func put(_ request: String) async throws -> String { try await forward("put", request) }
-    func delete(_ request: String) async throws -> String { try await forward("delete", request) }
-    func patch(_ request: String) async throws -> String { try await forward("patch", request) }
+    func post(_ request: String) async throws -> String { try await forward(request) }
+    func get(_ request: String) async throws -> String { try await forward(request) }
+    func put(_ request: String) async throws -> String { try await forward(request) }
+    func delete(_ request: String) async throws -> String { try await forward(request) }
+    func patch(_ request: String) async throws -> String { try await forward(request) }
 
-    private func forward(_ method: String, _ envelope: String) async throws -> String {
-        var request = URLRequest(url: baseURL.appendingPathComponent("veyra-relay").appendingPathComponent(method))
+    private func forward(_ envelope: String) async throws -> String {
+        var request = URLRequest(url: baseURL.appendingPathComponent("issuertokengateway").appendingPathComponent("v1"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let session = session() { request.setValue("Bearer \(session)", forHTTPHeaderField: "Authorization") }
@@ -178,7 +180,8 @@ struct BankBackendRelay: VeyraProxyProvider {
             throw Self.classify(error)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // Your backend relays Veyra's status: a non-2xx means the request was delivered.
+        // A non-2xx came back from Veyra (or your gateway): the request was delivered. Your proxy's
+        // own failures arrive as a 200 body the SDK recognises — returned unchanged like any other.
         guard (200..<300).contains(status) else {
             throw VeyraRelayError(kind: .other, neverSent: false, httpStatus: status)
         }

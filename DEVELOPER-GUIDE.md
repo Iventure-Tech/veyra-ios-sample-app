@@ -689,7 +689,7 @@ let context = try await VeyraSoftPOS.shared.payments.createContext(
     amountMinorUnits: amount,
     currency: "566",
     onExpired: { qrState = .failed("This payment code has expired — start a new payment") },
-    merchantOrderID: "ORDER-42"        // required: YOUR order id — never a lookup key
+    merchantOrderID: "ORDER-42"        // required: YOUR order id, unique per merchant
 )
 // render context.mpmPayload verbatim as the QR, then poll:
 while !Task.isCancelled {
@@ -726,7 +726,7 @@ do {
     confirm(scanned.amountMinorUnits, card: scanned.maskedCard)   // merchant confirms the QR's amount
     let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(
         scanned,
-        merchantOrderID: "ORDER-42"                // required: YOUR order id — never a lookup key
+        merchantOrderID: "ORDER-42"                // required: YOUR order id, unique per merchant
     )
     lastPaymentReference = outcome.reference       // SDK-MINTED reference — use for the receipt
     showResult(approved: outcome.approved, code: outcome.responseCode)
@@ -737,7 +737,7 @@ do {
 
 `CustomerQrChargeOutcome`: `approved: Bool`, `responseCode`, `transactionID`, `reference`, plus `creditTransactionID` + `isCreditConfirmationSupported` (populated on approved charges — the cue to wait for credit confirmation, see `transactions.creditConfirmation`).
 
-> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: **required** on every merchant payment, echoed back, never validated for uniqueness and never used as a key, so the same value may sit on two attempts of one sale — which is exactly what links a retry to its order. `createContext`, `chargeCustomerQr` and `tap.session` all require it: omitting it does not compile, and a blank (or over-255-character) value throws `VeyraSoftPOSError.invalidRequest` before anything is sent.
+> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: **required** on every merchant payment, echoed back, and **unique per merchant** across all its payments, whatever their outcome: a payment that reuses one — even one used by a declined or failed payment — is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, and `createContext` throws `VeyraSoftPOSError.duplicateMerchantOrderID`, before anything is sent. A retry needs a new order id; several QRs may share one until one of them is paid. `createContext`, `chargeCustomerQr` and `tap.session` all require it: omitting it does not compile, and a blank (or over-255-character) value throws `VeyraSoftPOSError.invalidRequest` before anything is sent.
 
 ---
 
@@ -1264,7 +1264,7 @@ let history = try await VeyraWallet.shared.tokenisation
     .transactionHistory(tokenUniqueReference: ref, limit: 100)
 ```
 
-`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderID` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, generated-QR rows learn it from the status poll, so `nil` on a still-open row means "not learned yet", not "no order id"; **display only, never a lookup key** — receipts and status refreshes still key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
+`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderID` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, generated-QR rows learn it from the status poll, so `nil` on a still-open row means "not learned yet", not "no order id"; for display and reconciliation — receipts and status refreshes key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
 ##### `observeTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
 
@@ -1457,6 +1457,7 @@ result is catalogued in [SDK error codes](#sdk-error-codes--the-sdkerrorcode-cat
 | | `.notSignedIn` | Any call after `signOut()` and before the next `configure(_:customerID:)` | Send the user to your sign-in; configure with the customer once they are back. |
 | | `.tapRefused(message)` | Arming the tap reader was refused — the wallet's payment is mid-flight (combined apps) | "Finish or cancel the current payment first." Never occurs in a SoftPOS-only app. |
 | | `.invalidRequest(message)` | A call refused **before anything was sent** because an argument is invalid — e.g. a blank `merchantOrderID` on `tap.session` (thrown by `start()`), `chargeCustomerQr` or `createContext` | Fix the call. There is no payment, response code or transaction to look up. Android reports the same as `SdkErrorCode.INVALID_REQUEST`. |
+| | `.duplicateMerchantOrderID(message)` | `payments.createContext` when another payment of this merchant already uses the `merchantOrderID`, whatever its outcome — no QR was created | Create the QR with a different order id. Several QRs may share one until one of them is paid. Android reports the same as `SdkErrorCode.DUPLICATE_MERCHANT_ORDER_ID`. |
 | | `.notAuthenticated(message)` | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAssertionProvider.assertion` returned `nil` or threw, or the token endpoint refused the client. Nothing was sent: no response code, nothing recorded | With a `VeyraAssertionProvider` this usually means nobody is signed in: send the user to sign-in, then retry. Android reports the same as `SdkErrorCode.NOT_AUTHENTICATED`. |
 | | `.invalidConfiguration(message)` | `configure` with an unusable provider, or a different kind of provider than this process already uses | A setup error: fix the configuration. `message` names the field. |
 | | `.noNetworkConnection(message)` | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — on a device with no working internet connection | Ask the merchant to connect and try again. Nothing reached the gateway; no transaction was recorded. |
@@ -1645,6 +1646,7 @@ status:
 | `"96"` | `SYSTEM_MALFUNCTION` | `PENDING` | A service threw while processing; the outcome is ambiguous | Same as `68`. It may yet settle — never report it as a decline. |
 | `"91"` | `ISSUER_SWITCH_NOT_AVAILABLE` | `FAILED` | The connection never opened — provably nothing was sent | Safe to retry. The merchant's own connection is not the problem. |
 | `"25"` | `UNABLE_TO_LOCATE_RECORD` | `FAILED` | The gateway has no such transaction — it never arrived | Terminal and safe: the payment did not happen. Take it again. |
+| `"94"` | `DUPLICATE_MERCHANT_ORDER_ID` | `FAILED` | Another payment of this merchant already uses the `merchantOrderId` — approved, pending, declined or failed | Nothing was sent. Take the payment with a different order id. |
 | `"07"` | `ACCOUNT_VALIDATION_FAILED` | `FAILED` | The destination (settlement) account was refused by the bank's own validation | Nothing was transferred. Fix the settlement account on the merchant profile. |
 | `"21"` | `NAME_ENQUIRY_FAILED` | `FAILED` | The pre-transfer name enquiry itself failed, so the transfer was never dispatched | Nothing was transferred — retry; if it persists, check the settlement account details. |
 

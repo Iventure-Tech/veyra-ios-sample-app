@@ -404,8 +404,8 @@ struct GetPaidView: View {
                         qrState = .failed("This payment code has expired — please start a new payment")
                         scheduleAutoReturn()
                     },
-                    // Your own order id — required, and unique among approved and unresolved
-                    // payments (a declined sale's retry may reuse it). The transaction reference is the SDK's to mint.
+                    // Your own order id — required, and unique across all of the merchant's
+                    // payments (a retry needs a new one). The transaction reference is the SDK's to mint.
                     merchantOrderID: SampleData.nextOrderID()
                 )
                 guard let image = Self.makeQR(payload: context.mpmPayload) else {
@@ -447,7 +447,7 @@ struct GetPaidView: View {
             } catch is CancellationError {
                 // Page left / new QR requested.
             } catch {
-                // Another approved or pending payment already uses this order id
+                // Another payment already uses this order id
                 // (VeyraSoftPOSError.duplicateMerchantOrderID); nothing was created.
                 qrState = .failed(error.localizedDescription.contains("DUPLICATE_MERCHANT_ORDER_ID")
                     ? "This order id is already used by another payment — start a new sale"
@@ -554,8 +554,8 @@ struct GetPaidView: View {
         creditConfirmState = nil
         let session = VeyraSoftPOS.shared.tap.session(
             amountMinorUnits: amountMinorUnits ?? 0,
-            // Your own order id — required, and unique among approved and unresolved
-            // payments (a declined sale's retry may reuse it). The transaction reference is the SDK's to mint.
+            // Your own order id — required, and unique across all of the merchant's payments (a
+            // retry needs a new one). The transaction reference is the SDK's to mint.
             merchantOrderID: SampleData.nextOrderID()
         ) { event in
             switch event {

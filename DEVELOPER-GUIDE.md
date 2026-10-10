@@ -205,24 +205,39 @@ struct MyAssertionProvider: VeyraAssertionProvider {
 }
 ```
 
-**`VeyraProxyProvider`** — five functions, one per HTTP method. The SDK calls them for every
-backend call:
+**`VeyraProxyProvider`** — one function, `send`. The SDK calls it for every backend call; the
+envelope it passes names the HTTP method:
 
 ```swift
 struct MyProxyProvider: VeyraProxyProvider {
     let bank: MyBankAPI
-
-    func post(_ request: String) async throws -> String { try await bank.veyraProxy(request) }
-    func get(_ request: String) async throws -> String { try await bank.veyraProxy(request) }
-    func put(_ request: String) async throws -> String { try await bank.veyraProxy(request) }
-    func delete(_ request: String) async throws -> String { try await bank.veyraProxy(request) }
-    func patch(_ request: String) async throws -> String { try await bank.veyraProxy(request) }
+    func send(_ request: String) async throws -> String { try await bank.veyraProxy(request) }
 }
 ```
 
-`bank.veyraProxy` sends the envelope to `POST {your API gateway}/issuertokengateway/v1` and returns
+`bank.veyraProxy` sends the envelope to `POST {your API gateway}/issuertokengateway/v1/proxy` and returns
 Veyra's body unchanged. On failure it throws `VeyraRelayError`, saying whether the request was sent
 — see [the failure contract](#the-proxy-providers-failure-contract).
+
+**Proxy flow.** For the proxy provider, **deploy the Veyra Issuer Token Gateway (ITG): it supports
+proxying all SDK requests.** It obtains an access token from the Veyra token endpoint and calls the
+Veyra API for you, so you write no proxy code of your own on the server:
+
+```
+Your app ── VeyraProxyProvider.send(envelope)
+  │
+  ├─▶ Your (issuer) API gateway / authorisation server
+  │     POST /issuertokengateway/v1/proxy — checks your app's session,
+  │     removes the /issuertokengateway/v1 context
+  │
+  ├─▶ Veyra Issuer Token Gateway (ITG)          POST /proxy
+  │     ├─▶ Veyra token endpoint                 client-credentials grant (the ITG's own
+  │     │                                        credentials) → access token, cached until expiry
+  │     └─▶ Veyra API                            method + service path, query, headers, body,
+  │                                              with Authorization
+  │
+  ◀── Veyra's status and body, unchanged (or 200 PROXY_FAILED from the ITG itself)
+```
 
 ### Configuring with your provider
 
@@ -271,12 +286,14 @@ POST {your backend}/oauth2/token                           (VeyraAssertionProvid
      audience=<audience>
   →  200 {"access_token": "<compact JWT>", …}   401 when no user is signed in (the provider returns nil)
 
-POST {your API gateway}/issuertokengateway/v1 (VeyraProxyProvider)
+POST {your API gateway}/issuertokengateway/v1/proxy (VeyraProxyProvider)
      body: the SDK's envelope, unchanged, for every method
-  →  your gateway checks the app's session and forwards the envelope to your issuer token
-     gateway (ITG). The ITG authenticates to Veyra with its own OAuth client-credentials token
-     (held server-side; an API key is not accepted), calls `service` + `path` with `method`,
-     `query`, `headers` and `body`, and answers with Veyra's status and body unchanged
+  →  your gateway checks the app's session, removes the `/issuertokengateway/v1` context and
+     forwards the envelope to the Veyra Issuer Token Gateway (ITG) as `POST /proxy`
+  →  the ITG gets an access token from the Veyra token endpoint with its own OAuth
+     client credentials (held server-side; an API key is not accepted), calls the
+     Veyra API (`service` + `path` with `method`, `query`, `headers` and `body`),
+     and answers with Veyra's status and body unchanged
 ```
 
 **Your authorization server signs** the exchanged token — a compact JWT, with the signing key held in an HSM or KMS:
@@ -328,7 +345,7 @@ and cannot be exported (Secure Enclave). Returning `nil` or throwing fails the c
 sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
 refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
-**`/issuertokengateway/v1` receives the envelope (version 1, public API).** Each `request` your
+**`/issuertokengateway/v1/proxy` receives the envelope (version 1, public API).** Each `request` your
 proxy provider receives is one JSON string that says everything about the call:
 
 ```json
@@ -345,8 +362,8 @@ proxy provider receives is one JSON string that says everything about the call:
 
 - `service` is the Veyra API the call is for: `WALLET` or `SOFTPOS`. It names the API, not your
   SDK — a wallet call to the payment API is `SOFTPOS`. Your proxy backend routes on it.
-- `method` is the HTTP method to use towards Veyra. Every function receives the complete envelope,
-  so all five post to the one endpoint.
+- `method` is the HTTP method the ITG uses towards Veyra. Because the envelope names it, the
+  provider has a single `send` and every call goes to one endpoint.
 - `path` is relative to that service — never a full URL, and without any API prefix.
 - `query` is omitted when there is none (values are decoded). `body` is absent on `GET` and `DELETE`.
 - New fields may be added under the same `version`; a breaking change bumps `version`.

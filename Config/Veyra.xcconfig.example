@@ -18,7 +18,7 @@ VEYRA_TOKEN_REQUESTOR_ID = your-token-requestor-id
 //   assertion provider      VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL + VEYRA_BANK_CLIENT_ID /
 //                           VEYRA_BANK_CLIENT_SECRET (RFC 8693 token exchange at
 //                           {VEYRA_BANK_BACKEND_BASE_URL}/oauth2/token)
-//   proxy provider          VEYRA_BANK_BACKEND_BASE_URL (your API gateway serves POST /issuertokengateway/v1)
+//   proxy provider          VEYRA_BANK_BACKEND_BASE_URL (your API gateway serves POST /issuertokengateway/v1/proxy)
 //   client-secret provider  DEPRECATED — VEYRA_CLIENT_ID + VEYRA_CLIENT_SECRET held in the app
 
 // OAuth client issued by Veyra. Client id: the assertion and client-secret providers.

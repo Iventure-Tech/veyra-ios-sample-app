@@ -220,7 +220,7 @@ struct MyProxyProvider: VeyraProxyProvider {
 }
 ```
 
-`bank.veyraProxy` sends the envelope to `POST {your API gateway}/issuertokengateway/v1` and returns
+`bank.veyraProxy` sends the envelope to `POST {your API gateway}/issuertokengateway/v1/proxy` and returns
 Veyra's body unchanged. On failure it throws `VeyraRelayError`, saying whether the request was sent
 — see [the failure contract](#the-proxy-providers-failure-contract).
 
@@ -271,10 +271,11 @@ POST {your backend}/oauth2/token                           (VeyraAssertionProvid
      audience=<audience>
   →  200 {"access_token": "<compact JWT>", …}   401 when no user is signed in (the provider returns nil)
 
-POST {your API gateway}/issuertokengateway/v1 (VeyraProxyProvider)
+POST {your API gateway}/issuertokengateway/v1/proxy (VeyraProxyProvider)
      body: the SDK's envelope, unchanged, for every method
-  →  your gateway checks the app's session and forwards the envelope to your issuer token
-     gateway (ITG). The ITG authenticates to Veyra with its own OAuth client-credentials token
+  →  your gateway checks the app's session, removes the `/issuertokengateway/v1` context and
+     forwards the envelope to your issuer token gateway (ITG) as `POST /proxy`.
+     The ITG authenticates to Veyra with its own OAuth client-credentials token
      (held server-side; an API key is not accepted), calls `service` + `path` with `method`,
      `query`, `headers` and `body`, and answers with Veyra's status and body unchanged
 ```
@@ -328,7 +329,7 @@ and cannot be exported (Secure Enclave). Returning `nil` or throwing fails the c
 sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
 refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
-**`/issuertokengateway/v1` receives the envelope (version 1, public API).** Each `request` your
+**`/issuertokengateway/v1/proxy` receives the envelope (version 1, public API).** Each `request` your
 proxy provider receives is one JSON string that says everything about the call:
 
 ```json

@@ -149,13 +149,13 @@ enum TokenExchangeError: Error, CustomStringConvertible {
     }
 }
 
-/// The proxy provider: send every SDK call through **your bank**. The SDK's envelope —
-/// `{version, service, method, path, query, headers, body}` — goes, unchanged, as the body of
-/// `POST {base}/issuertokengateway/v1`, whichever of the five functions the SDK called: the
+/// The proxy provider: send every SDK call through **your bank**. The SDK's envelope — `{version,
+/// service, method, path, query, headers, body}` — goes, unchanged, as the body of `POST
+/// {base}/issuertokengateway/v1/proxy`, whichever of the five functions the SDK called: the
 /// envelope already names the method and the Veyra service. Your API gateway checks the app's
-/// session and forwards it to your proxy backend (your ITG), which calls Veyra and answers with
-/// Veyra's response body — returned here unchanged. Called from the SDK's background work too, so
-/// it must not depend on a screen being up.
+/// session, removes the `/issuertokengateway/v1` context and forwards it to your ITG's `/proxy`,
+/// which calls Veyra and answers with Veyra's response body — returned here unchanged. Called from
+/// the SDK's background work too, so it must not depend on a screen being up.
 struct BankBackendRelay: VeyraProxyProvider {
     let baseURL: URL
     let session: @Sendable () -> String?
@@ -167,7 +167,7 @@ struct BankBackendRelay: VeyraProxyProvider {
     func patch(_ request: String) async throws -> String { try await forward(request) }
 
     private func forward(_ envelope: String) async throws -> String {
-        var request = URLRequest(url: baseURL.appendingPathComponent("issuertokengateway").appendingPathComponent("v1"))
+        var request = URLRequest(url: baseURL.appendingPathComponent("issuertokengateway").appendingPathComponent("v1").appendingPathComponent("proxy"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let session = session() { request.setValue("Bearer \(session)", forHTTPHeaderField: "Authorization") }

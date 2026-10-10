@@ -30,6 +30,10 @@
 	<string>$(DEVELOPMENT_TEAM)</string>
 	<key>VeyraBankBackendBaseURL</key>
 	<string>$(VEYRA_BANK_BACKEND_BASE_URL)</string>
+	<key>VeyraBankClientID</key>
+	<string>$(VEYRA_BANK_CLIENT_ID)</string>
+	<key>VeyraBankClientSecret</key>
+	<string>$(VEYRA_BANK_CLIENT_SECRET)</string>
 	<key>VeyraBankSessionToken</key>
 	<string>$(VEYRA_BANK_SESSION_TOKEN)</string>
 	<key>VeyraClientID</key>

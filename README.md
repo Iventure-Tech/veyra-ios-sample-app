@@ -91,13 +91,15 @@ returning a different one:
 
 | `provider()` returns | Provider | What it needs (`Config/Veyra.xcconfig`) | Your bank backend serves |
 |---|---|---|---|
-| `assertionProvider()` (recommended) | `VeyraAssertionProvider` | `VEYRA_CLIENT_ID`, `VEYRA_BANK_BACKEND_BASE_URL` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `assertionProvider()` (recommended) | `VeyraAssertionProvider` | `VEYRA_CLIENT_ID` (to the SDK); `VEYRA_BANK_BACKEND_BASE_URL`, `VEYRA_BANK_CLIENT_ID`, `VEYRA_BANK_CLIENT_SECRET` (never to the SDK) | `POST /oauth2/token`: an RFC 8693 token exchange of the user's session for the assertion, authenticated with your bank client (HTTP Basic) → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
 | `proxyProvider()` | `VeyraProxyProvider` | `VEYRA_BANK_BACKEND_BASE_URL` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `clientSecretProvider()` (**deprecated**, what the sample ships with) | `VeyraClientSecretProvider` | `VEYRA_CLIENT_ID`, `VEYRA_CLIENT_SECRET` | nothing — the secret sits in the app, which is why this provider is being retired |
 
 xcconfig reads `//` as a comment, so write the backend URL as `https:/$()/your-backend.example`.
-`VEYRA_BANK_SESSION_TOKEN` is a **placeholder** for your app's own login session, sent to your
-bank backend as a bearer token. The two providers that call your backend are in
+`VEYRA_BANK_CLIENT_ID` / `VEYRA_BANK_CLIENT_SECRET` are your bank's **own** OAuth client at its
+authorization server, not the Veyra client. `VEYRA_BANK_SESSION_TOKEN` is a **placeholder** for
+your app's own login session: the token exchange's `subject_token`, and the proxy provider's bearer
+token. The two providers that call your backend are in
 `VeyraBank/AppConnection.swift` — short, and meant to be copied. The proxy provider is called from the SDK's
 background work too, not only from screens. The full contract — the assertion's claims, the request
 envelope, and how a proxy provider reports a failure — is in

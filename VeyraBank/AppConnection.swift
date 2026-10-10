@@ -27,9 +27,16 @@ enum AppConnection {
         // proxyProvider()
     }
 
-    /// Your client id, and the bank backend that signs the assertion.
+    /// Your Veyra client id (the only value the SDK receives), and your bank's own client at the
+    /// authorization server that exchanges the user's session for the assertion.
     static func assertionProvider() -> any VeyraProvider {
-        BankBackendAssertionProvider(clientId: value("VeyraClientID"), baseURL: bankBackend(), session: { bankSession })
+        BankBackendAssertionProvider(
+            clientId: value("VeyraClientID"),
+            bankClientId: required("VeyraBankClientID", "VEYRA_BANK_CLIENT_ID"),
+            bankClientSecret: required("VeyraBankClientSecret", "VEYRA_BANK_CLIENT_SECRET"),
+            baseURL: bankBackend(),
+            session: { bankSession }
+        )
     }
 
     /// Only the bank backend that relays the SDK's calls — no client id, no secret.
@@ -43,6 +50,12 @@ enum AppConnection {
         ClientSecretCredentials(clientId: value("VeyraClientID"), clientSecret: value("VeyraClientSecret"))
     }
 
+    private static func required(_ key: String, _ name: String) -> String {
+        let v = value(key)
+        guard !v.isEmpty else { fatalError("\(name) must be set in Config/Veyra.xcconfig for this provider") }
+        return v
+    }
+
     private static func bankBackend() -> URL {
         guard let url = URL(string: value("VeyraBankBackendBaseURL")), !value("VeyraBankBackendBaseURL").isEmpty else {
             fatalError("VEYRA_BANK_BACKEND_BASE_URL must be set in Config/Veyra.xcconfig for this provider")
@@ -51,38 +64,88 @@ enum AppConnection {
     }
 }
 
-/// The assertion provider: fetch a short-lived assertion for the signed-in user from **your bank
-/// backend's endpoint** (`POST {base}/sdk-assertion`). See the integration guide for the minimum
-/// claims — `iss`, `sub`, `aud` equal to the `audience` the SDK passes here, `iat`, `exp` ≤ 5 min
-/// and a unique `jti` — plus the optional `cnf.jkt` (the `jkt` the SDK passes here) and `acr`. Request
-/// `{"audience": …, "jkt": …}` with your app's session; response
-/// `{"assertion": "<compact JWT>"}`. Returns nil when no user is signed in (401).
+/// The assertion provider: exchange the signed-in user's bank session for a short-lived assertion at
+/// **your authorization server's token endpoint** (`POST {base}/oauth2/token`), using OAuth 2.0
+/// Token Exchange (RFC 8693). See the integration guide for the minimum claims — `iss`, `sub`,
+/// `aud` equal to the `audience` the SDK passes here, `iat`, `exp` ≤ 5 min and a unique `jti`.
+///
+/// Request (form-encoded; your bank's client authenticated with HTTP Basic
+/// `bankClientId:bankClientSecret`): `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`,
+/// `subject_token=<bank session>`, `subject_token_type=…:token-type:access_token`,
+/// `requested_token_type=…:token-type:jwt`, `audience=<Veyra API base URL>`. Response:
+/// `{"access_token": "<compact JWT>", …}`. Returns nil when no user is signed in, or the server
+/// refuses the session (401); any other failure throws.
 struct BankBackendAssertionProvider: VeyraAssertionProvider {
-    /// The OAuth client id Veyra issued to this app (public, not a secret).
+    static let grantTokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange"
+    static let tokenTypeAccessToken = "urn:ietf:params:oauth:token-type:access_token"
+    static let tokenTypeJWT = "urn:ietf:params:oauth:token-type:jwt"
+
+    /// The OAuth client id Veyra issued to this app (public, not a secret). The SDK's only credential.
     let clientId: String
+    /// Your bank's client at its authorization server (HTTP Basic). Never given to the SDK.
+    let bankClientId: String
+    /// A secret in an app can be extracted — a real app does this exchange on its own backend.
+    let bankClientSecret: String
     let baseURL: URL
     let session: @Sendable () -> String?
+    var urlSession: URLSession = .shared
 
     func assertion(audience: String, jkt: String) async throws -> String? {
-        guard let session = session() else { return nil } // logged out
-        var request = URLRequest(url: baseURL.appendingPathComponent("sdk-assertion"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(session)", forHTTPHeaderField: "Authorization") // your bank session
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["audience": audience, "jkt": jkt])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let session = session(), !session.isEmpty else { return nil } // logged out
+        let request = tokenExchangeRequest(session: session, audience: audience)
+        let (data, response) = try await urlSession.data(for: request)
         return try Self.parse(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
     }
 
-    /// The assertion from your backend's answer: nil on 401 (no session), throws otherwise.
+    func tokenExchangeRequest(session: String, audience: String) -> URLRequest {
+        var request = URLRequest(url: baseURL.appendingPathComponent("oauth2").appendingPathComponent("token"))
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let basic = Data("\(bankClientId):\(bankClientSecret)".utf8).base64EncodedString()
+        request.setValue("Basic \(basic)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data(Self.form([
+            ("grant_type", Self.grantTokenExchange),
+            ("subject_token", session),
+            ("subject_token_type", Self.tokenTypeAccessToken),
+            ("requested_token_type", Self.tokenTypeJWT),
+            ("audience", audience),
+        ]).utf8)
+        return request
+    }
+
+    /// `application/x-www-form-urlencoded`, every value percent-encoded (RFC 3986 unreserved kept).
+    static func form(_ fields: [(String, String)]) -> String {
+        var unreserved = CharacterSet.alphanumerics
+        unreserved.insert(charactersIn: "-._~")
+        return fields.map { name, value in
+            "\(name)=\(value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? value)"
+        }.joined(separator: "&")
+    }
+
+    /// The exchanged token from the server's answer: nil on 401 (no session), throws otherwise.
     static func parse(status: Int, body: Data) throws -> String? {
         if status == 401 { return nil }
-        guard (200..<300).contains(status) else { throw URLError(.badServerResponse) }
-        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
-        guard let assertion = json?["assertion"] as? String, !assertion.isEmpty else {
-            throw URLError(.cannotParseResponse)
+        guard (200..<300).contains(status) else {
+            throw TokenExchangeError.refused(status: status, body: String(decoding: body, as: UTF8.self))
         }
-        return assertion
+        let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        guard let token = json?["access_token"] as? String, !token.isEmpty else {
+            throw TokenExchangeError.noAccessToken
+        }
+        return token
+    }
+}
+
+/// Why the token exchange produced no assertion.
+enum TokenExchangeError: Error, CustomStringConvertible {
+    case refused(status: Int, body: String)
+    case noAccessToken
+
+    var description: String {
+        switch self {
+        case let .refused(status, body): return "token exchange answered HTTP \(status): \(body)"
+        case .noAccessToken: return "token exchange answered without an access_token"
+        }
     }
 }
 
@@ -139,8 +202,8 @@ struct BankBackendRelay: VeyraProxyProvider {
     }
 }
 
-/// The deprecated client-secret provider — **for testing only**, e.g. against UAT before your bank
-/// backend can sign assertions. A secret inside an app can be extracted: ship a
+/// The deprecated client-secret provider — **for testing only**, e.g. against UAT before your
+/// authorization server can issue assertions. A secret inside an app can be extracted: ship a
 /// `BankBackendAssertionProvider` or `BankBackendRelay` instead.
 @available(*, deprecated, message: "The client-secret provider is deprecated: return assertionProvider() or proxyProvider().")
 struct ClientSecretCredentials: VeyraClientSecretProvider {

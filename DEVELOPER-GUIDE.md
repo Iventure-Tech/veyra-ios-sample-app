@@ -548,7 +548,7 @@ let result = try await VeyraSoftPOS.shared.merchant.register(
         addressLine1: "12 Marina Road",
         city: "Lagos", state: "Lagos",
         countryCode: "0566",               // ISO 3166-1 numeric, 4 digits
-        bvn: "12345678901",                // required for .personal; optional for .business
+        bvn: "12345678901",                // optional for both merchant types
         cacNumber: nil,                    // .business only
         accountNumber: "1234567890",       // settlement NUBAN account
         institutionCode: "000000",         // from merchant.banks()

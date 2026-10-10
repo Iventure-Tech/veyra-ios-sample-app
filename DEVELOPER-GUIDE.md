@@ -243,8 +243,8 @@ do {
 //                  try VeyraWallet.configure(walletConfig, customerID:, provider:)
 ```
 
-The sample has no mode setting either: `AppConnection.provider()` in
-`VeyraBank/AppConnection.swift` returns one provider, and to switch you return a different one —
+The sample has no mode setting either: `AppProvider.provider()` in
+`VeyraBank/AppProvider.swift` returns one provider, and to switch you return a different one —
 exactly what your own app does. Its two backend providers, `BankBackendAssertionProvider` and
 `BankBackendRelay`, are short and meant to be copied; each reads only its own values from
 `Config/Veyra.xcconfig` (the assertion provider: `VEYRA_CLIENT_ID`, which is all the SDK receives,

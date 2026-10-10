@@ -44,7 +44,7 @@ targets:
         # Veyra AID only — the app reads Veyra's own payment application, no scheme cards.
         com.apple.developer.nfc.readersession.iso7816.select-identifiers:
           - "A000000891010104"
-        # Injected from Config/Veyra.xcconfig; read by SampleConfig / AppConnection at launch.
+        # Injected from Config/Veyra.xcconfig; read by SampleConfig / AppProvider at launch.
         VeyraClientID: $(VEYRA_CLIENT_ID)
         VeyraClientSecret: $(VEYRA_CLIENT_SECRET)
         VeyraBankBackendBaseURL: $(VEYRA_BANK_BACKEND_BASE_URL)

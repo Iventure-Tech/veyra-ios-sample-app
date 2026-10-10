@@ -64,7 +64,7 @@ per-outcome guidance — lives in this repository.
 
    The sample ships using the deprecated `VeyraClientSecretProvider`, **for testing only**, so it
    runs with just your `VEYRA_CLIENT_ID` and `VEYRA_CLIENT_SECRET`. To try the providers a real
-   app ships, change the one line in `AppConnection.provider()` (see
+   app ships, change the one line in `AppProvider.provider()` (see
    [Choose a provider](#choose-a-provider)).
 
 4. Optionally update `VeyraBank/SampleData.swift` with your test account details so the
@@ -86,7 +86,7 @@ from the Veyra artifact server using your `~/.netrc` credentials — no local fi
 
 Both SDKs share one **provider** — how they reach Veyra. There is no mode to set: the SDK works
 out the method from the kind of provider it is given. The sample picks one in code —
-`AppConnection.provider()` in `VeyraBank/AppConnection.swift` returns it — and switching is
+`AppProvider.provider()` in `VeyraBank/AppProvider.swift` returns it — and switching is
 returning a different one:
 
 | `provider()` returns | Provider | What it needs (`Config/Veyra.xcconfig`) | Your bank backend serves |
@@ -100,7 +100,7 @@ xcconfig reads `//` as a comment, so write the backend URL as `https:/$()/your-b
 authorization server, not the Veyra client. `VEYRA_BANK_SESSION_TOKEN` is a **placeholder** for
 your app's own login session: the token exchange's `subject_token`, and the proxy provider's bearer
 token. The two providers that call your backend are in
-`VeyraBank/AppConnection.swift` — short, and meant to be copied. The proxy provider is called from the SDK's
+`VeyraBank/AppProvider.swift` — short, and meant to be copied. The proxy provider is called from the SDK's
 background work too, not only from screens. The full contract — the assertion's claims, the request
 envelope, and how a proxy provider reports a failure — is in
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
@@ -110,7 +110,7 @@ envelope, and how a proxy provider reports a failure — is in
 | Path | What it shows |
 |---|---|
 | `VeyraBank/VeyraBankApp.swift` | SDK configuration & initialisation (both SDKs via the combined facade), Home |
-| `VeyraBank/AppConnection.swift` | How the SDKs reach Veyra: the one provider the app passes (`AppConnection.provider()`), and the two providers (`VeyraAssertionProvider`, `VeyraProxyProvider`) that call your bank backend |
+| `VeyraBank/AppProvider.swift` | How the SDKs reach Veyra: the one provider the app passes (`AppProvider.provider()`), and the two providers (`VeyraAssertionProvider`, `VeyraProxyProvider`) that call your bank backend |
 | `VeyraBank/GetPaidView.swift` | The merchant (Get paid) flow — all three acceptance rails |
 | `VeyraBank/PayView.swift` + `AddCardView` / `ScanToPayView` / `ShowToPayView` | The wallet (Pay) flow |
 | `VeyraBank/TransactionsView.swift` + `TransactionDetailView` | Wallet history & receipts |

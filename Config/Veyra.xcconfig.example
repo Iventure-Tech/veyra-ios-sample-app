@@ -12,7 +12,7 @@ VEYRA_TOKEN_REQUESTOR_ID = your-token-requestor-id
 
 // ── The values for the provider both SDKs use ───────────────────────────────────
 // There is no mode to set: the SDK works out how to reach Veyra from the provider the app passes.
-// Which one the sample builds is chosen in code, in AppConnection.provider(). It ships with the
+// Which one the sample builds is chosen in code, in AppProvider.provider(). It ships with the
 // deprecated client-secret provider so the sample runs with just the client id and secret from
 // your onboarding pack — FOR TESTING ONLY. Each provider reads only its own values:
 //   assertion provider      VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL + VEYRA_BANK_CLIENT_ID /

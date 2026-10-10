@@ -5,7 +5,7 @@
 import Foundation
 import VeyraWallet
 
-enum AppConnection {
+enum AppProvider {
     private static func value(_ key: String) -> String {
         let raw = (Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)

@@ -27,13 +27,13 @@ enum AppProvider {
     /// The provider for both SDKs. There is no mode: the SDK works out how to reach Veyra from
     /// the kind of provider it is given, so switching is returning a different one here.
     ///
-    /// Return ONE of the three. The sample ships with the client-secret provider so it runs with
-    /// just your onboarding client id and secret — **for testing only**; a real app returns
-    /// `assertionProvider()` or `proxyProvider()`.
+    /// Return ONE of the three. The sample ships with `proxyProvider()`: every SDK call goes through
+    /// your bank backend, so the app holds no Veyra secret. `assertionProvider()` is the other
+    /// production choice; the deprecated `clientSecretProvider()` is for testing only.
     static func provider() -> any VeyraProvider {
-        clientSecretProvider()
+        proxyProvider()
         // assertionProvider()
-        // proxyProvider()
+        // clientSecretProvider()
     }
 
     /// Your Veyra client id (the only value the SDK receives), and your bank's own client at the

@@ -91,15 +91,18 @@ returning a different one:
 
 | `provider()` returns | Provider | What it needs (`Config/Veyra.xcconfig`) | Your bank backend serves |
 |---|---|---|---|
-| `assertionProvider()` (recommended) | `VeyraAssertionProvider` | `VEYRA_CLIENT_ID` (to the SDK); `VEYRA_BANK_BACKEND_BASE_URL`, `VEYRA_BANK_CLIENT_ID`, `VEYRA_BANK_CLIENT_SECRET` (never to the SDK) | `POST /oauth2/token`: an RFC 8693 token exchange of the user's session for the assertion, authenticated with your bank client (HTTP Basic) → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
-| `proxyProvider()` | `VeyraProxyProvider` | `VEYRA_BANK_BACKEND_BASE_URL` | `POST /issuertokengateway/v1/proxy` for every method — your API gateway removes the `/issuertokengateway/v1` context and forwards the SDK's envelope to your issuer token gateway's `/proxy`, which calls Veyra and answers with Veyra's body |
+| `assertionProvider()` (recommended) | `VeyraAssertionProvider` | `VEYRA_CLIENT_ID` (to the SDK); `VEYRA_BANK_BACKEND_BASE_URL`, `VEYRA_BANK_CLIENT_ID`, `VEYRA_BANK_CLIENT_SECRET`, `VEYRA_USERNAME`, `VEYRA_PASSWORD` (never to the SDK) | `POST /oauth2/token`: an RFC 8693 token exchange of the user's session for the assertion, authenticated with your bank client (HTTP Basic) → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
+| `proxyProvider()` | `VeyraProxyProvider` | `VEYRA_BANK_BACKEND_BASE_URL`, `VEYRA_BANK_CLIENT_ID`, `VEYRA_BANK_CLIENT_SECRET`, `VEYRA_USERNAME`, `VEYRA_PASSWORD` | `POST /issuertokengateway/v1/proxy` for every method — your API gateway removes the `/issuertokengateway/v1` context and forwards the SDK's envelope to your issuer token gateway's `/proxy`, which calls Veyra and answers with Veyra's body |
 | `clientSecretProvider()` (**deprecated**, what the sample ships with) | `VeyraClientSecretProvider` | `VEYRA_CLIENT_ID`, `VEYRA_CLIENT_SECRET` | nothing — the secret sits in the app, which is why this provider is being retired |
 
 xcconfig reads `//` as a comment, so write the backend URL as `https:/$()/your-backend.example`.
 `VEYRA_BANK_CLIENT_ID` / `VEYRA_BANK_CLIENT_SECRET` are your bank's **own** OAuth client at its
-authorization server, not the Veyra client. `VEYRA_BANK_SESSION_TOKEN` is a **placeholder** for
-your app's own login session: the token exchange's `subject_token`, and the proxy provider's bearer
-token. The two providers that call your backend are in
+authorization server, not the Veyra client. **The bank session:** both
+providers that call your bank first log the user in — `POST {VEYRA_BANK_BACKEND_BASE_URL}/oauth2/token`
+with your bank's client as HTTP Basic and `grant_type=password`, `username`, `password` — and use the
+access token as the bank session (cached until it expires): the token exchange's `subject_token`, and
+the proxy provider's bearer token. For now the sample reads `VEYRA_USERNAME` / `VEYRA_PASSWORD` from
+`Config/Veyra.xcconfig`; a real app takes them from its login screen and never stores the password. The two providers that call your backend are in
 `VeyraBank/AppProvider.swift` — short, and meant to be copied. The proxy provider is called from the SDK's
 background work too, not only from screens. The full contract — the assertion's claims, the request
 envelope, and how a proxy provider reports a failure — is in

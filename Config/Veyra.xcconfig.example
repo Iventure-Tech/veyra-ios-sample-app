@@ -18,7 +18,9 @@ VEYRA_TOKEN_REQUESTOR_ID = your-token-requestor-id
 //   assertion provider      VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL + VEYRA_BANK_CLIENT_ID /
 //                           VEYRA_BANK_CLIENT_SECRET (RFC 8693 token exchange at
 //                           {VEYRA_BANK_BACKEND_BASE_URL}/oauth2/token)
-//   proxy provider          VEYRA_BANK_BACKEND_BASE_URL (your API gateway serves POST /issuertokengateway/v1/proxy)
+//   proxy provider          VEYRA_BANK_BACKEND_BASE_URL + VEYRA_BANK_CLIENT_ID / VEYRA_BANK_CLIENT_SECRET
+//                           (your API gateway serves POST /issuertokengateway/v1/proxy)
+//   both bank providers     + VEYRA_USERNAME / VEYRA_PASSWORD (the demo user's bank login)
 //   client-secret provider  DEPRECATED — VEYRA_CLIENT_ID + VEYRA_CLIENT_SECRET held in the app
 
 // OAuth client issued by Veyra. Client id: the assertion and client-secret providers.
@@ -36,7 +38,11 @@ VEYRA_BANK_BACKEND_BASE_URL =
 VEYRA_BANK_CLIENT_ID = your-bank-client-id
 VEYRA_BANK_CLIENT_SECRET = your-bank-client-secret
 
-// PLACEHOLDER for your bank app's own logged-in session: the assertion provider's subject_token,
-// and "Authorization: Bearer <token>" to the proxy provider's relay; blank means nobody is signed in. A real app uses its own
-// login session here. This is not a Veyra credential.
-VEYRA_BANK_SESSION_TOKEN = sample-bank-session
+// The demo user's bank login. The app logs in with them (password grant at
+// {VEYRA_BANK_BACKEND_BASE_URL}/oauth2/token, the bank client above as HTTP Basic) to get the bank
+// session: the assertion provider's token-exchange subject_token, and the proxy provider's bearer
+// token. Blank means nobody is signed in. A real app takes these from its login screen and never
+// stores the password. xcconfig treats `//` as a comment and `$(...)` as a variable, so a password
+// containing either must be escaped (`/$()/`, `$$`).
+VEYRA_USERNAME =
+VEYRA_PASSWORD =

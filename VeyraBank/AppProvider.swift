@@ -12,8 +12,17 @@ enum AppProvider {
         return raw.hasPrefix("your-") ? "" : raw // an untouched template value counts as unset
     }
 
-    /// Stands in for your bank app's own logged-in session when calling your backend.
-    static var bankSession: String? { value("VeyraBankSessionToken").isEmpty ? nil : value("VeyraBankSessionToken") }
+    /// The signed-in user's bank session: logs in to your bank with the user's username and
+    /// password (password grant at `{VEYRA_BANK_BACKEND_BASE_URL}/oauth2/token`) and caches the
+    /// token. This sample reads the credentials from Config/Veyra.xcconfig; a real app takes them
+    /// from its login screen and never stores the password.
+    static let bankSession = BankSession(
+        baseURL: bankBackend(),
+        bankClientId: required("VeyraBankClientID", "VEYRA_BANK_CLIENT_ID"),
+        bankClientSecret: required("VeyraBankClientSecret", "VEYRA_BANK_CLIENT_SECRET"),
+        username: value("VeyraUsername"),
+        password: value("VeyraPassword")
+    )
 
     /// The provider for both SDKs. There is no mode: the SDK works out how to reach Veyra from
     /// the kind of provider it is given, so switching is returning a different one here.
@@ -35,13 +44,13 @@ enum AppProvider {
             bankClientId: required("VeyraBankClientID", "VEYRA_BANK_CLIENT_ID"),
             bankClientSecret: required("VeyraBankClientSecret", "VEYRA_BANK_CLIENT_SECRET"),
             baseURL: bankBackend(),
-            session: { bankSession }
+            session: { try await bankSession.token() }
         )
     }
 
-    /// Only the bank backend that relays the SDK's calls — no client id, no secret.
+    /// Your bank's gateway, which relays the SDK's calls — no Veyra client id or secret in the app.
     static func proxyProvider() -> any VeyraProvider {
-        BankBackendRelay(baseURL: bankBackend(), session: { bankSession })
+        BankBackendRelay(baseURL: bankBackend(), session: { try await bankSession.token() })
     }
 
     /// Deprecated, testing only: just the client id and secret.
@@ -87,11 +96,11 @@ struct BankBackendAssertionProvider: VeyraAssertionProvider {
     /// A secret in an app can be extracted — a real app does this exchange on its own backend.
     let bankClientSecret: String
     let baseURL: URL
-    let session: @Sendable () -> String?
+    let session: @Sendable () async throws -> String?
     var urlSession: URLSession = .shared
 
     func assertion(audience: String, jkt: String) async throws -> String? {
-        guard let session = session(), !session.isEmpty else { return nil } // logged out
+        guard let session = try await session(), !session.isEmpty else { return nil } // logged out
         let request = tokenExchangeRequest(session: session, audience: audience)
         let (data, response) = try await urlSession.data(for: request)
         return try Self.parse(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
@@ -158,13 +167,25 @@ enum TokenExchangeError: Error, CustomStringConvertible {
 /// the SDK's background work too, so it must not depend on a screen being up.
 struct BankBackendRelay: VeyraProxyProvider {
     let baseURL: URL
-    let session: @Sendable () -> String?
+    let session: @Sendable () async throws -> String?
 
     func send(_ envelope: String) async throws -> String {
+        // No bank session — signed out, or the login itself failed — means the call never left.
+        let token: String
+        do {
+            guard let t = try await session(), !t.isEmpty else {
+                throw VeyraRelayError(kind: .other, neverSent: true, message: "Not signed in to the bank")
+            }
+            token = t
+        } catch let error as VeyraRelayError {
+            throw error
+        } catch {
+            throw VeyraRelayError(kind: .other, neverSent: true, message: "Bank login failed: \(error)")
+        }
         var request = URLRequest(url: baseURL.appendingPathComponent("issuertokengateway").appendingPathComponent("v1").appendingPathComponent("proxy"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let session = session() { request.setValue("Bearer \(session)", forHTTPHeaderField: "Authorization") }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = Data(envelope.utf8)
         let data: Data
         let response: URLResponse
@@ -206,4 +227,82 @@ struct BankBackendRelay: VeyraProxyProvider {
 struct ClientSecretCredentials: VeyraClientSecretProvider {
     let clientId: String
     let clientSecret: String
+}
+
+/// The signed-in user's bank session: an access token from your bank's authorization server,
+/// obtained by logging the user in with their username and password (OAuth 2.0 password grant).
+/// Both providers use it — the assertion provider as the token exchange's `subject_token`, the
+/// proxy provider as the `Authorization: Bearer` on every relayed call.
+///
+/// Request: `POST {base}/oauth2/token`, your bank's client authenticated with HTTP Basic
+/// `bankClientId:bankClientSecret`, form `grant_type=password&username=…&password=…`. Response:
+/// `{"access_token": "…", "expires_in": 3600, …}`. Cached until shortly before it expires. A
+/// refused login (400/401) or missing credentials mean nobody is signed in (`nil`); any other
+/// failure throws. An actor, so concurrent SDK calls share one login.
+actor BankSession {
+    private let baseURL: URL
+    private let bankClientId: String
+    private let bankClientSecret: String
+    private let username: String
+    private let password: String
+    private let urlSession: URLSession
+    private let now: @Sendable () -> Date
+    private var cached: (token: String, expiresAt: Date)?
+
+    /// When the server does not say, assume a short life; renew a little early.
+    static let defaultLifetime: TimeInterval = 300
+    static let expiryMargin: TimeInterval = 30
+
+    init(baseURL: URL, bankClientId: String, bankClientSecret: String, username: String, password: String,
+         urlSession: URLSession = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.baseURL = baseURL
+        self.bankClientId = bankClientId
+        self.bankClientSecret = bankClientSecret
+        self.username = username
+        self.password = password
+        self.urlSession = urlSession
+        self.now = now
+    }
+
+    /// The current session token, logging in when there is none (or it is about to expire).
+    func token() async throws -> String? {
+        if let cached, now() < cached.expiresAt { return cached.token }
+        cached = nil
+        guard !username.isEmpty, !password.isEmpty else { return nil }
+        var request = URLRequest(url: baseURL.appendingPathComponent("oauth2").appendingPathComponent("token"))
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let basic = Data("\(bankClientId):\(bankClientSecret)".utf8).base64EncodedString()
+        request.setValue("Basic \(basic)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data(BankBackendAssertionProvider.form([
+            ("grant_type", "password"),
+            ("username", username),
+            ("password", password),
+        ]).utf8)
+        let (data, response) = try await urlSession.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 400 || status == 401 { return nil } // credentials refused: signed out
+        guard (200..<300).contains(status) else { throw BankLoginError.refused(status: status) }
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let token = json?["access_token"] as? String, !token.isEmpty else { throw BankLoginError.noAccessToken }
+        let lifetime = (json?["expires_in"] as? NSNumber)?.doubleValue ?? Self.defaultLifetime
+        cached = (token, now().addingTimeInterval(max(0, lifetime - Self.expiryMargin)))
+        return token
+    }
+
+    /// Forget the session (sign-out): the next call logs in again.
+    func clear() { cached = nil }
+}
+
+/// Why the bank login produced no session.
+enum BankLoginError: Error, CustomStringConvertible {
+    case refused(status: Int)
+    case noAccessToken
+
+    var description: String {
+        switch self {
+        case let .refused(status): return "bank login answered HTTP \(status)"
+        case .noAccessToken: return "bank login answered without an access_token"
+        }
+    }
 }

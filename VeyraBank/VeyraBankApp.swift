@@ -3,7 +3,7 @@
 // tap acceptance, get-paid QR, charge a customer QR) / Pay (wallet: add card, scan-to-pay,
 // show-QR-to-pay, history & receipts). Black + crimson (#C1272D).
 // Identifiers and the connection to Veyra (mode + credentials or your bank backend) come from
-// Config/Veyra.xcconfig — see AppConnection and the README for setup.
+// Config/Veyra.xcconfig — see AppProvider and the README for setup.
 import SwiftUI
 import VeyraSDK
 import VeyraSoftPOS
@@ -52,7 +52,7 @@ enum SampleConfig {
     private static func configureCombined() throws {
         try VeyraSDK.configure(
             customerID: DemoSession.customerID,
-            provider: AppConnection.provider(),
+            provider: AppProvider.provider(),
             softpos: .init(
                 environment: .test,
                 // The provider credential the gateway resolves the acquirer id and MCC from —

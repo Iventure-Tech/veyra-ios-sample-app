@@ -34,8 +34,10 @@
 	<string>$(VEYRA_BANK_CLIENT_ID)</string>
 	<key>VeyraBankClientSecret</key>
 	<string>$(VEYRA_BANK_CLIENT_SECRET)</string>
-	<key>VeyraBankSessionToken</key>
-	<string>$(VEYRA_BANK_SESSION_TOKEN)</string>
+	<key>VeyraUsername</key>
+	<string>$(VEYRA_USERNAME)</string>
+	<key>VeyraPassword</key>
+	<string>$(VEYRA_PASSWORD)</string>
 	<key>VeyraClientID</key>
 	<string>$(VEYRA_CLIENT_ID)</string>
 	<key>VeyraClientSecret</key>

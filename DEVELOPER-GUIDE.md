@@ -200,7 +200,7 @@ struct MyAssertionProvider: VeyraAssertionProvider {
 
     /// A JWT from your backend for the signed-in user, or nil when nobody is signed in.
     func assertion(audience: String, jkt: String) async throws -> String? {
-        try await bank.sdkAssertion(audience: audience, jkt: jkt)   // POST {your backend}/sdk-assertion
+        try await bank.sdkAssertion(audience: audience, jkt: jkt)   // e.g. a token exchange at your authorization server
     }
 }
 ```
@@ -247,22 +247,29 @@ The sample has no mode setting either: `AppConnection.provider()` in
 `VeyraBank/AppConnection.swift` returns one provider, and to switch you return a different one —
 exactly what your own app does. Its two backend providers, `BankBackendAssertionProvider` and
 `BankBackendRelay`, are short and meant to be copied; each reads only its own values from
-`Config/Veyra.xcconfig` (the assertion provider: `VEYRA_CLIENT_ID` and
-`VEYRA_BANK_BACKEND_BASE_URL`; the proxy provider: `VEYRA_BANK_BACKEND_BASE_URL`). The sample ships
+`Config/Veyra.xcconfig` (the assertion provider: `VEYRA_CLIENT_ID`, which is all the SDK receives,
+plus `VEYRA_BANK_BACKEND_BASE_URL` and your bank's own client `VEYRA_BANK_CLIENT_ID` /
+`VEYRA_BANK_CLIENT_SECRET` for the token exchange; the proxy provider: `VEYRA_BANK_BACKEND_BASE_URL`). The sample ships
 returning `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs
 just `VEYRA_CLIENT_ID` and `VEYRA_CLIENT_SECRET` — so it runs before your backend has either
 endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
-`VeyraAssertionProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both are
-authenticated with your app's **own** session (the sample sends a placeholder bearer token from
-`Config/Veyra.xcconfig` — replace it with your login session); neither is a Veyra credential.
+`VeyraAssertionProvider` and `VeyraProxyProvider` each need one endpoint on **your** side. Both
+carry your app's **own** session (the sample uses a placeholder token from `Config/Veyra.xcconfig` —
+replace it with your login session); neither is a Veyra credential.
 
 ```
-POST {your backend}/sdk-assertion                          (VeyraAssertionProvider)
-     {"audience": "<audience>", "jkt": "<jkt>"}
-  →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns nil)
+POST {your backend}/oauth2/token                           (VeyraAssertionProvider)
+     RFC 8693 token exchange, application/x-www-form-urlencoded,
+     Authorization: Basic base64(<bank client id>:<bank client secret>)
+     grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+     subject_token=<the user's session>
+     subject_token_type=urn:ietf:params:oauth:token-type:access_token
+     requested_token_type=urn:ietf:params:oauth:token-type:jwt
+     audience=<audience>
+  →  200 {"access_token": "<compact JWT>", …}   401 when no user is signed in (the provider returns nil)
 
 POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
      body: the SDK's envelope, unchanged
@@ -271,7 +278,7 @@ POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
      answers with Veyra's status and body unchanged
 ```
 
-**`/sdk-assertion` signs** a compact JWT, with the signing key held in an HSM or KMS:
+**Your authorization server signs** the exchanged token — a compact JWT, with the signing key held in an HSM or KMS:
 
 **Required by Veyra — the minimum.** How you produce the assertion is up to you: your own
 endpoint, your authorization server's token exchange (RFC 8693), or any identity provider. Veyra
@@ -301,7 +308,7 @@ and the SDK reports `NOT_AUTHENTICATED`.
 `acr` only if Veyra has agreed a minimum sign-in level for your issuer. Any other claim is ignored.
 
 **Device binding between your app and your backend is optional.** You don't have to bind the
-assertion to the device, either with `cnf.jkt` or by using DPoP on your own `/sdk-assertion`
+assertion to the device, either with `cnf.jkt` or by using DPoP on your own token
 endpoint. Veyra accepts an unbound assertion that meets the minimum above. Either way, the SDK
 always uses DPoP with Veyra: the access token it gets is bound to a key generated on this device
 that cannot be exported. **What binding adds:** without it, an assertion that leaks in its few

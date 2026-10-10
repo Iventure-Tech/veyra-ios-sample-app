@@ -15,8 +15,9 @@ VEYRA_TOKEN_REQUESTOR_ID = your-token-requestor-id
 // Which one the sample builds is chosen in code, in AppConnection.provider(). It ships with the
 // deprecated client-secret provider so the sample runs with just the client id and secret from
 // your onboarding pack — FOR TESTING ONLY. Each provider reads only its own values:
-//   assertion provider      VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL (your backend serves
-//                           POST /sdk-assertion)
+//   assertion provider      VEYRA_CLIENT_ID + VEYRA_BANK_BACKEND_BASE_URL + VEYRA_BANK_CLIENT_ID /
+//                           VEYRA_BANK_CLIENT_SECRET (RFC 8693 token exchange at
+//                           {VEYRA_BANK_BACKEND_BASE_URL}/oauth2/token)
 //   proxy provider          VEYRA_BANK_BACKEND_BASE_URL (your backend serves POST /veyra-relay/{method})
 //   client-secret provider  DEPRECATED — VEYRA_CLIENT_ID + VEYRA_CLIENT_SECRET held in the app
 
@@ -29,7 +30,13 @@ VEYRA_CLIENT_SECRET = your-client-secret
 // a comment, so write the scheme separator as /$()/ — e.g. https:/$()/bank-backend.example
 VEYRA_BANK_BACKEND_BASE_URL =
 
-// PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as
-// "Authorization: Bearer <token>"; blank means nobody is signed in. A real app uses its own
+// Your bank's own OAuth client at its authorization server — NOT the Veyra client above, and
+// never passed to the SDK. The assertion provider authenticates the token exchange with it
+// (HTTP Basic).
+VEYRA_BANK_CLIENT_ID = your-bank-client-id
+VEYRA_BANK_CLIENT_SECRET = your-bank-client-secret
+
+// PLACEHOLDER for your bank app's own logged-in session: the assertion provider's subject_token,
+// and "Authorization: Bearer <token>" to the proxy provider's relay; blank means nobody is signed in. A real app uses its own
 // login session here. This is not a Veyra credential.
 VEYRA_BANK_SESSION_TOKEN = sample-bank-session

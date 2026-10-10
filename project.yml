@@ -48,6 +48,8 @@ targets:
         VeyraClientID: $(VEYRA_CLIENT_ID)
         VeyraClientSecret: $(VEYRA_CLIENT_SECRET)
         VeyraBankBackendBaseURL: $(VEYRA_BANK_BACKEND_BASE_URL)
+        VeyraBankClientID: $(VEYRA_BANK_CLIENT_ID)
+        VeyraBankClientSecret: $(VEYRA_BANK_CLIENT_SECRET)
         VeyraBankSessionToken: $(VEYRA_BANK_SESSION_TOKEN)
         VeyraPaymentAppProviderID: $(VEYRA_PAYMENT_APP_PROVIDER_ID)
         VeyraTokenRequestorID: $(VEYRA_TOKEN_REQUESTOR_ID)

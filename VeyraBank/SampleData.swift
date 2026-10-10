@@ -25,11 +25,11 @@ struct SampleMerchant {
     // wallet-proven tuple (tokenisation returns Approved).
     let accountNumber = "1234567890" // your test account (NUBAN) from Veyra onboarding
     let institutionCode = "000000" // your test institution code
-    let accountName = "Ada Demo" // = merchant name
-    let bvn = "22222222222"
+    let accountName = "Test User" // first + last name = merchant name
+    let bvn = "1234567890"
     // Also sent as the wallet account id: the SDK hashes it and the issuer compares that hash
     // against the email/phone registered on the account, so use the registered email.
-    let emailAddress = "ada.demo@example.com"
+    let emailAddress = "test-user@iventure.tech"
     let mobileNumber = "2348000000000"
     let addressLine1 = "12 Marina Street"
     let addressLine2 = "Lagos Island"
@@ -97,7 +97,7 @@ enum DemoSession {
 /// Typed access point for the demo identities.
 enum SampleData {
     /// The demo customers this app can sign in to the SDKs — two, so Home can show a switch.
-    static let customerIDs = ["demo-customer-1", "demo-customer-2"]
+    static let customerIDs = ["test-user@iventure.tech", "demo-customer-2"]
     static let personal = SampleMerchant(kind: .personal)
     static let business = SampleMerchant(kind: .business)
 

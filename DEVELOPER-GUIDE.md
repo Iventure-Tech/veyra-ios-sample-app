@@ -264,10 +264,12 @@ exactly what your own app does. Its two backend providers, `BankBackendAssertion
 `BankBackendRelay`, are short and meant to be copied; each reads only its own values from
 `Config/Veyra.xcconfig` (the assertion provider: `VEYRA_CLIENT_ID`, which is all the SDK receives,
 plus `VEYRA_BANK_BACKEND_BASE_URL` and your bank's own client `VEYRA_BANK_CLIENT_ID` /
-`VEYRA_BANK_CLIENT_SECRET` for the token exchange; the proxy provider: `VEYRA_BANK_BACKEND_BASE_URL`). The sample ships
-returning `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs
-just `VEYRA_CLIENT_ID` and `VEYRA_CLIENT_SECRET` — so it runs before your backend has either
-endpoint.
+`VEYRA_BANK_CLIENT_SECRET` for the token exchange; the proxy provider: `VEYRA_BANK_BACKEND_BASE_URL`
+and the same bank client; both also log the user in with `VEYRA_USERNAME` / `VEYRA_PASSWORD`). The
+sample ships returning the proxy provider (`BankBackendRelay`), so the app holds no Veyra secret. The
+deprecated `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs
+just `VEYRA_CLIENT_ID` and `VEYRA_CLIENT_SECRET` — is still there for testing before your backend
+has either endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 

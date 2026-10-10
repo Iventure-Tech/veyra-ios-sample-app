@@ -271,6 +271,15 @@ endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
+> **Signing the user in to your bank is your app's responsibility, not the SDK's.** The SDK never
+> authenticates with your bank or its backend. It doesn't collect credentials, it doesn't obtain,
+> refresh or end a bank session, and it doesn't call your login or token endpoints. It only asks your
+> provider for what it needs: an assertion (`VeyraAssertionProvider`), or to send a request
+> (`VeyraProxyProvider`). Your provider gets those using the session your app already holds. How the
+> user signs in (password, biometrics, single sign-on, multi-factor), and how that session is stored,
+> refreshed and revoked, is your app's own design. The sample's password-grant login, with credentials
+> read from local config, is a demo stand-in only — not a pattern to ship.
+
 `VeyraAssertionProvider` and `VeyraProxyProvider` each need one endpoint on **your** side. Both
 carry your app's **own** session: the sample logs in with `VEYRA_USERNAME`/`VEYRA_PASSWORD` from `Config/Veyra.xcconfig` — a password
 grant at `{bankBackendBaseUrl}/oauth2/token` — and uses the returned access token; replace that with

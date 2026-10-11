@@ -37,6 +37,12 @@ struct AddCardView: View {
     @State private var digitiseSucceeded = false
     @State private var digitiseError: String?
     @State private var formError: String?
+    // Your reference for this add-card attempt. Passing one is what makes the digitise
+    // cancellable: Cancel names it with `cancelDigitise(clientRequestID:)`. A fresh one per
+    // attempt; a cancelled attempt sent nothing, so its retry may reuse it — this sample just
+    // takes a fresh one.
+    @State private var clientRequestID: String?
+    @State private var cancelNote: String?
 
     init() {
         _accountNumber = State(initialValue: SampleData.personal.accountNumber)
@@ -111,6 +117,15 @@ struct AddCardView: View {
                         ProgressView()
                         Text("Digitising…").foregroundStyle(.gray)
                     }
+                }
+                // Not digitising: Cancel just closes. Digitising: cancellable only while the
+                // request is still on the device (attestation, key setup); once it has been sent
+                // the SDK refuses and the digitise finishes.
+                if !digitiseSucceeded {
+                    Button("Cancel", role: .destructive) { cancelDigitise() }
+                }
+                if let cancelNote, digitising {
+                    Text(cancelNote).font(.footnote).foregroundStyle(.orange)
                 }
                 if let digitiseResult {
                     Text(digitiseResult).foregroundStyle(digitiseSucceeded ? .green : .white)
@@ -213,6 +228,10 @@ struct AddCardView: View {
         digitiseResult = nil
         digitiseSucceeded = false
         digitiseError = nil
+        cancelNote = nil
+        let requestID = UUID().uuidString
+        clientRequestID = requestID
+        defer { clientRequestID = nil }
         do {
             // Business inputs the wallet provider supplies:
             // APPROVE + TRUSTED/HIGHLY_TRUSTED + GOOD_ACTIVITY_HISTORY, MANUAL entry, and the
@@ -233,8 +252,14 @@ struct AddCardView: View {
                 deviceScore: .trusted,
                 accountScore: .highlyTrusted,
                 recommendationReasons: [.goodActivityHistory],
-                bankName: selectedBankName
+                bankName: selectedBankName,
+                clientRequestID: requestID
             )
+            // Cancelled before anything was sent: NOT_SENT / CANCELLED — close the screen.
+            if r.responseStatus == VeyraResponseStatus.notSent && r.responseStatusReason == "CANCELLED" {
+                presentationMode.wrappedValue.dismiss()
+                return
+            }
             // Every digitise ends with an outcome. FAILED / DECLINED / NOT_SENT carry the reason;
             // digitise is never PENDING — an answer that never arrived is FAILED: add the card again.
             let stored = r.tokenStored ? " · token stored" : ""
@@ -244,6 +269,29 @@ struct AddCardView: View {
             digitiseSucceeded = r.tokenStored
         } catch {
             digitiseError = String(describing: error)
+        }
+    }
+
+    /// Cancel names this attempt's clientRequestID. The cancel answers at once; the digitise
+    /// itself still delivers its own outcome to the `await` above.
+    private func cancelDigitise() {
+        guard digitising, let clientRequestID else {
+            presentationMode.wrappedValue.dismiss()   // nothing running: just close
+            return
+        }
+        switch VeyraWallet.shared.tokenisation.cancelDigitise(clientRequestID: clientRequestID) {
+        case .cancelled:
+            // The digitise ends NOT_SENT / CANCELLED; the await above closes the screen.
+            break
+        case .tooLateToCancelRequestAlreadySent:
+            // Already with the issuer — keep waiting for its result.
+            cancelNote = "This can no longer be cancelled"
+        case .tooLateToCancelTaskAlreadyProcessed:
+            // Already finished: keep waiting for the result it delivered.
+            break
+        case .noDigitisationInProgressForClientRequestID, .noPaymentInProgressForOrderID:
+            // Nothing running under this ID: close.
+            presentationMode.wrappedValue.dismiss()
         }
     }
 }

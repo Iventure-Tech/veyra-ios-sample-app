@@ -89,6 +89,9 @@ struct GetPaidView: View {
     // takes a fresh one.
     @State private var retryOrderID: String?
     @State private var currentOrderID = ""
+    // "This can no longer be cancelled" — shown when Cancel arrives after the request has left the
+    // phone; the payment carries on and its own result still arrives.
+    @State private var cancelNote: String?
     @FocusState private var amountFocused: Bool
 
     /// A blank/absent status is treated as active
@@ -122,7 +125,7 @@ struct GetPaidView: View {
             case .qr: qrWaiting
             case .scanCustomerQr: customerQrScanner
             case .confirmCustomerQr(let scanned): customerQrConfirm(scanned)
-            case .chargingCustomerQr: ProgressView("Charging…").tint(.white).foregroundStyle(.white)
+            case .chargingCustomerQr: chargingCustomerQr
             case .customerQrResult(let approved, let detail): customerQrResult(approved, detail)
             case .transactions: MerchantTransactionsView { page = transactionsReturn }
             }
@@ -355,12 +358,25 @@ struct GetPaidView: View {
                 }
             }
             Spacer()
+            if let cancelNote, case .creating = qrState {
+                Text(cancelNote).font(.footnote).foregroundStyle(.orange)
+            }
             Button(qrFinished ? "Done" : "Cancel", role: qrFinished ? ButtonRole?.none : .destructive) {
-                qrTask?.cancel()
-                stopCreditConfirmationWatch()
                 if qrFinished {
+                    qrTask?.cancel()
+                    stopCreditConfirmationWatch()
                     returnToHome()
+                } else if case .creating = qrState {
+                    // While the QR is being created, cancel the create by its order ID.
+                    cancelPayment {
+                        qrTask?.cancel()
+                        stopCreditConfirmationWatch()
+                        page = .amountEntry
+                    }
                 } else {
+                    // The QR is showing: nothing is in flight on the phone — just leave.
+                    qrTask?.cancel()
+                    stopCreditConfirmationWatch()
                     page = .amountEntry
                 }
             }
@@ -368,6 +384,8 @@ struct GetPaidView: View {
         }
         .padding()
         .onDisappear {
+            // Leaving the screen: stop a create still on the phone (by order ID).
+            if case .creating = qrState { _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) }
             qrTask?.cancel()
             stopCreditConfirmationWatch()
             // Stop the SDK expiry watch so its callback can't fire into a dismissed view.
@@ -387,6 +405,7 @@ struct GetPaidView: View {
     private func startQrPayment() {
         qrTask?.cancel()
         qrState = .creating
+        cancelNote = nil
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
@@ -414,6 +433,12 @@ struct GetPaidView: View {
                     merchantOrderID: takeOrderID()
                 )
                 settleOrderID(responseStatus: context.responseStatus)
+                // Cancelled before it was sent: nothing was created — back to amount entry (the
+                // order ID is kept for the retry).
+                if context.responseStatus == VeyraResponseStatus.notSent && context.responseStatusReason == "CANCELLED" {
+                    page = .amountEntry
+                    return
+                }
                 // Creating the QR ends with an outcome: render it only when it was made.
                 guard context.responseStatus == VeyraResponseStatus.approved,
                       let txRef = context.txRef, let payload = context.mpmPayload else {
@@ -533,21 +558,30 @@ struct GetPaidView: View {
                     .font(.footnote).foregroundStyle(.gray)
                     .multilineTextAlignment(.center).padding(.horizontal)
             }
+            if let cancelNote, !tapFinished {
+                Text(cancelNote).font(.footnote).foregroundStyle(.orange)
+            }
             Spacer()
             Button(tapFinished ? "Done" : "Cancel", role: tapFinished ? ButtonRole?.none : .destructive) {
-                tapSession?.cancel()
-                tapSession = nil
                 if tapFinished {
+                    tapSession = nil
                     returnToHome()
                 } else {
-                    page = .amountEntry
+                    // Cancel names the payment by its order ID. Before it is sent the reader stops
+                    // and the tap's `.result` arrives NOT_SENT / CANCELLED (handled there).
+                    cancelPayment {
+                        tapSession = nil
+                        page = .amountEntry
+                    }
                 }
             }
             .buttonStyle(.bordered)
         }
         .padding()
         .onDisappear {
-            tapSession?.cancel()
+            // Leaving the screen: cancel a tap still on the phone by its order ID. One already
+            // sent is not cancelled — it runs to its result, which the SDK records.
+            if !tapFinished { _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) }
             tapSession = nil
             // Render-only watch: stopping it stops the screen re-reading the store, never the
             // SDK's own credit polling, which is app-scoped.
@@ -582,6 +616,7 @@ struct GetPaidView: View {
     private func startTapPayment() {
         tapState = .waiting
         tapHint = nil
+        cancelNote = nil
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
@@ -615,8 +650,15 @@ struct GetPaidView: View {
                     scheduleAutoReturn()
                 }
             case .result(let result):
-                lastPaymentReference = result.reference
                 settleOrderID(responseStatus: result.responseStatus)
+                // Cancelled before it was sent (Cancel / leaving): nothing was charged — back to
+                // amount entry; the order ID is kept for the retry.
+                if result.responseStatus == VeyraResponseStatus.notSent && result.responseStatusReason == "CANCELLED" {
+                    tapSession = nil
+                    page = .amountEntry
+                    return
+                }
+                lastPaymentReference = result.reference
                 tapState = .result(result)
                 tapHint = nil
                 // An approved tap carries the credit facts, so it enters the same "confirming
@@ -707,8 +749,50 @@ struct GetPaidView: View {
         .padding()
     }
 
+    /// The charge in flight: progress plus Cancel, which stops it while it is still on the phone.
+    private var chargingCustomerQr: some View {
+        VStack(spacing: 20) {
+            ProgressView("Charging…").tint(.white).foregroundStyle(.white)
+            if let cancelNote {
+                Text(cancelNote).font(.footnote).foregroundStyle(.orange)
+            }
+            Button("Cancel", role: .destructive) {
+                cancelPayment { page = .amountEntry }
+            }
+            .buttonStyle(.bordered)
+        }
+        .onDisappear {
+            // Leaving the screen: cancel a charge still on the phone by its order ID. One already
+            // sent is not cancelled — it runs to its result, which the SDK records.
+            _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID)
+        }
+    }
+
+    /// Cancel the payment in flight by the order ID it was started with — the same call for the
+    /// tap, the CPM charge and the MPM QR create. The cancel answers at once; the payment itself
+    /// still delivers its own outcome (NOT_SENT / CANCELLED when the cancel won), which the rail's
+    /// result handler turns into "back to amount entry". `goBack` runs when there is nothing in
+    /// flight to wait for.
+    private func cancelPayment(goBack: () -> Void) {
+        switch VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) {
+        case .cancelled:
+            // The rail's own result (NOT_SENT / CANCELLED) takes the screen back.
+            break
+        case .tooLateToCancelRequestAlreadySent:
+            // Already with the bank: keep waiting for the result.
+            cancelNote = "This can no longer be cancelled"
+        case .tooLateToCancelTaskAlreadyProcessed:
+            // Already finished: its result is the answer and is (about to be) on screen.
+            break
+        case .noPaymentInProgressForOrderID, .noDigitisationInProgressForClientRequestID:
+            // Nothing in flight under this order ID: just go back.
+            goBack()
+        }
+    }
+
     private func chargeCustomerQr(_ scanned: ScannedCustomerQr) {
         page = .chargingCustomerQr
+        cancelNote = nil
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
@@ -720,6 +804,11 @@ struct GetPaidView: View {
                     merchantOrderID: takeOrderID()
                 )
                 settleOrderID(responseStatus: outcome.responseStatus)
+                // Cancelled before it was sent: nothing was charged — back to amount entry.
+                if outcome.responseStatus == VeyraResponseStatus.notSent && outcome.responseStatusReason == "CANCELLED" {
+                    page = .amountEntry
+                    return
+                }
                 // A delivered outcome (approved or declined) is recorded under the reference the
                 // SDK minted and the gateway echoed — never one the app made up.
                 lastPaymentReference = outcome.reference.isEmpty ? nil : outcome.reference

@@ -2,6 +2,8 @@
 // AVFoundation QR scan (portrait, cancel) → verified-merchant confirm screen (merchant, city,
 // amount) → Face ID on Pay (SDK-recorded CDCVM, one authentication per payment) → result.
 // A rejected payload never reaches confirm; cancel/auth-failure stays on confirm.
+// While the payment is still on the phone (Face ID sheet, building the payment) Cancel stops it
+// by the order ID signed into the QR; once sent it can no longer be cancelled.
 import AVFoundation
 import SwiftUI
 import VeyraWallet
@@ -146,9 +148,17 @@ struct ScanToPayView: View {
             }
             .disabled(busy)
             .padding(.horizontal, 24)
-            Button("Cancel") { dismiss() }
-                .disabled(busy)
-                .foregroundStyle(.secondary)
+            // Before Pay, Cancel just closes. While paying it cancels by the merchant order ID
+            // signed into the QR; a QR without one cannot be cancelled, so Cancel is disabled.
+            Button("Cancel") {
+                if busy, let orderID = payment.merchantOrderID, !orderID.isEmpty {
+                    cancelPayment(merchantOrderID: orderID)
+                } else {
+                    dismiss()
+                }
+            }
+            .disabled(busy && (payment.merchantOrderID ?? "").isEmpty)
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -164,6 +174,11 @@ struct ScanToPayView: View {
             // NOT_SENT: nothing was sent — stay on confirm with the reason and let the customer pay
             // the same QR again once it is fixed (cancelled sheet, card needs refreshing, offline…).
             if outcome.responseStatus == VeyraResponseStatus.notSent {
+                // Cancelled before it was sent (Cancel payment): nothing left the phone — go back.
+                if outcome.responseStatusReason == "CANCELLED" {
+                    dismiss()
+                    return
+                }
                 withAnimation { stage = .confirming(payment) }
                 switch outcome.responseStatusReason {
                 case "AUTH_CANCELLED":
@@ -203,6 +218,24 @@ struct ScanToPayView: View {
             // Only a setup mistake throws.
             withAnimation { stage = .confirming(payment) }
             confirmError = String(describing: error)
+        }
+    }
+
+    /// The cancel answers at once; the payment itself still delivers its own outcome to `pay`.
+    private func cancelPayment(merchantOrderID: String) {
+        switch VeyraWallet.shared.tokenisation.cancelPayment(merchantOrderID: merchantOrderID) {
+        case .cancelled:
+            // `pay` receives NOT_SENT / CANCELLED and leaves the screen.
+            break
+        case .tooLateToCancelRequestAlreadySent:
+            // The payment has left the phone: say so in the reason text and keep waiting.
+            confirmError = "This can no longer be cancelled"
+        case .tooLateToCancelTaskAlreadyProcessed:
+            // Already finished: keep waiting — `pay` shows its result.
+            break
+        case .noPaymentInProgressForOrderID, .noDigitisationInProgressForClientRequestID:
+            // Nothing running under this order ID: just go back.
+            dismiss()
         }
     }
 

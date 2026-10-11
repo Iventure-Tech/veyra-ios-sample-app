@@ -571,9 +571,10 @@ struct GetPaidView: View {
         return id
     }
 
-    /// After an outcome: keep the order ID for the retry only when the payment never reached Veyra.
+    /// After an outcome: keep the order ID for the retry only when nothing was done (NOT_SENT or RETRY).
     private func settleOrderID(responseStatus: String?) {
-        retryOrderID = responseStatus == VeyraResponseStatus.notSent ? currentOrderID : nil
+        retryOrderID = responseStatus == VeyraResponseStatus.notSent || responseStatus == VeyraResponseStatus.retry
+            ? currentOrderID : nil
     }
 
     /// Arm the CoreNFC reader for one tap; kernel dialogue events drive the screen —
@@ -915,7 +916,9 @@ private struct TapOutcome {
             // The order ID is already on another payment: never take a second payment for the order.
             icon = "exclamationmark.circle.fill"; color = .orange
             title = "Order already used"; message = duplicateOrderMessage(originalStatus: originalStatus)
-        case "NOT_SENT":
+        case "NOT_SENT", "RETRY":
+            // NOT_SENT never reached Veyra; RETRY reached it but was not sent to the bank. Either
+            // way nothing was charged; retry with the same order.
             // Never reached Veyra — nothing was charged; retry with the same order.
             icon = "arrow.clockwise.circle.fill"; color = .orange
             title = "Payment not sent"

@@ -161,6 +161,21 @@ struct ScanToPayView: View {
         withAnimation { stage = .paying(payment) }
         do {
             let outcome = try await VeyraWallet.shared.tokenisation.payScannedContext(payment)
+            // NOT_SENT: nothing was sent — stay on confirm with the reason and let the customer pay
+            // the same QR again once it is fixed (cancelled sheet, card needs refreshing, offline…).
+            if outcome.responseStatus == VeyraResponseStatus.notSent {
+                withAnimation { stage = .confirming(payment) }
+                switch outcome.responseStatusReason {
+                case "AUTH_CANCELLED":
+                    confirmError = nil
+                case "DEVICE_NOT_BOUND":
+                    // Retrying can never succeed here — only removing the card and adding it again.
+                    confirmError = "This card can't pay on this phone — remove it and add it again on this phone"
+                default:
+                    confirmError = outcome.message ?? outcome.responseStatusReason
+                }
+                return
+            }
             // The push answers with a status, not just a code, and PENDING is a real
             // answer — the payer must not be told they were refused when the SDK has stored the
             // payment as unresolved and is still polling for it.
@@ -173,28 +188,19 @@ struct ScanToPayView: View {
                 case .pending:
                     stage = .result(
                         state: state, headline: "Payment pending",
-                        detail: "The bank has not confirmed this yet (\(outcome.responseCode ?? "no code")). "
-                            + "It will appear in your transactions once it settles."
+                        detail: "The bank has not confirmed this yet (\(outcome.responseStatusReason ?? outcome.responseCode ?? "no code")). "
+                            + "It will appear in your transactions once it settles — don't pay again."
                     )
                 case .refused:
                     stage = .result(
                         state: state, headline: "Payment declined",
                         detail: outcome.message
-                            ?? "The payment was not approved (\(outcome.responseCode ?? "no code"))."
+                            ?? "The payment was not approved (\(outcome.responseStatusReason ?? outcome.responseCode ?? "no code"))."
                     )
                 }
             }
-        } catch VeyraWalletError.onlineRequired(let message) {
-            // The card must go online before it can pay — friendly, actionable copy.
-            withAnimation { stage = .confirming(payment) }
-            confirmError = message
-        } catch VeyraWalletError.deviceNotBound {
-            // The card was added on another device, or before this app was reinstalled: retrying
-            // can never succeed here — only removing the card and adding it again on this phone.
-            withAnimation { stage = .confirming(payment) }
-            confirmError = "This card can't pay on this phone — remove it and add it again on this phone"
         } catch {
-            // Terminal transport/SDK failure: back to confirm with the reason (no false result).
+            // Only a setup mistake throws.
             withAnimation { stage = .confirming(payment) }
             confirmError = String(describing: error)
         }

@@ -317,7 +317,12 @@ struct PayView: View {
     private func deactivate(_ tokenUniqueReference: String) async {
         actionError = nil
         do {
-            _ = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
+            let removal = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
+            // Only APPROVED removed the card; anything else leaves it in the wallet, so say why.
+            guard removal.responseStatus == VeyraResponseStatus.approved else {
+                actionError = removalError(removal)
+                return
+            }
             await reload() // card gone, next one promoted — the Active badge moves
         } catch {
             actionError = String(describing: error)
@@ -338,11 +343,29 @@ struct PayView: View {
         working = true
         defer { working = false }
         do {
-            _ = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
+            let removal = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
+            guard removal.responseStatus == VeyraResponseStatus.approved else {
+                actionError = removalError(removal)
+                return
+            }
             selectedID = nil
             await reload()
         } catch {
             actionError = String(describing: error)
+        }
+    }
+
+    /// Why a card removal did not happen. Only a setup mistake throws; every other answer is an outcome.
+    private func removalError(_ r: TokenStatusUpdateResponse) -> String {
+        switch r.responseStatus {
+        case VeyraResponseStatus.notSent:
+            return r.responseStatusReason == "NO_NETWORK_CONNECTION"
+                ? "No internet connection — connect and try again. The card was not removed."
+                : "The card was not removed (\(r.responseStatusReason ?? "not sent")). Try again."
+        case VeyraResponseStatus.pending:
+            return "We couldn't confirm the removal yet (\(r.responseStatusReason ?? "pending")). Check again shortly."
+        default:
+            return "The card could not be removed (\(r.responseStatusReason ?? r.responseStatus))."
         }
     }
 

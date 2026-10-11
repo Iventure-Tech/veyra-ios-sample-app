@@ -151,28 +151,34 @@ struct ShowToPayView: View {
             let qr = try await VeyraWallet.shared.tokenisation.showQrToPay(amountMinorUnits: amount) {
                 expired = true
             }
-            guard let image = Self.qrImage(from: qr.payload) else {
-                throw VeyraWalletError.requestFailed(message: "Could not render the QR")
+            // Showing a QR ends with an outcome: APPROVED (a QR was made) or NOT_SENT with the
+            // reason no QR could be made. Nothing is sent either way.
+            guard qr.responseStatus == VeyraResponseStatus.approved, let payload = qr.payload else {
+                switch qr.responseStatusReason {
+                case "AUTH_CANCELLED":
+                    // The customer dismissed the sheet — back to amount entry, no error banner.
+                    break
+                case "DEVICE_NOT_BOUND":
+                    // The card was added on another device, or before this app was reinstalled, and
+                    // will never be given payment keys here. Neither going online nor a smaller amount helps.
+                    errorMessage = "This card can't pay on this phone — remove it and add it again on this phone"
+                default:
+                    // ONLINE_REQUIRED, AMOUNT_EXCEEDS_CARD_LIMIT, AUTH_UNAVAILABLE, TOKEN_NOT_ACTIVE, …:
+                    // the SDK's message says what to do.
+                    errorMessage = qr.message ?? qr.responseStatusReason ?? "Could not make a payment QR"
+                }
+                phase = .amountEntry
+                return
+            }
+            guard let image = Self.qrImage(from: payload) else {
+                errorMessage = "Could not render the QR"
+                phase = .amountEntry
+                return
             }
             expired = false
             settled = nil
             phase = .showing(qr, image)
             startReconcilePolling(for: qr)
-        } catch VeyraWalletError.authenticationCancelled {
-            // The customer dismissed the sheet — back to amount entry, no error banner.
-            phase = .amountEntry
-        } catch VeyraWalletError.authenticationUnavailable(let message) {
-            errorMessage = message
-            phase = .amountEntry
-        } catch VeyraWalletError.onlineRequired(let message) {
-            // The card must go online before a payment QR can be produced.
-            errorMessage = message
-            phase = .amountEntry
-        } catch VeyraWalletError.deviceNotBound {
-            // The card was added on another device, or before this app was reinstalled, and will
-            // never be given payment keys here. Neither going online nor a smaller amount helps.
-            errorMessage = "This card can't pay on this phone — remove it and add it again on this phone"
-            phase = .amountEntry
         } catch {
             errorMessage = error.localizedDescription
             phase = .amountEntry
@@ -195,7 +201,7 @@ struct ShowToPayView: View {
                 guard !Task.isCancelled else { return }
                 try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
                 if let row = try? await VeyraWallet.shared.tokenisation
-                    .transactionHistory(tokenUniqueReference: qr.tokenUniqueReference, limit: 10)
+                    .transactionHistory(tokenUniqueReference: qr.tokenUniqueReference ?? "", limit: 10)
                     .first(where: { $0.transactionHash == qr.transactionHash }),
                     let status = row.authorizationStatus { // terminal by construction
                     // Don't display the pre-backfill placeholder as a merchant name.

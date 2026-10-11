@@ -312,16 +312,22 @@ struct TransactionDetailView: View {
         statusCheckNote = nil
         defer { checkingStatus = false }
         do {
-            let fresh = try await VeyraWallet.shared.tokenisation
+            // A check that could not be made is not thrown: it says why, and the row is unchanged.
+            let lookup = try await VeyraWallet.shared.tokenisation
                 .refreshTransactionStatus(transactionHash: hash)
+            if let reason = lookup.failureReason {
+                statusCheckNote = reason == "NO_NETWORK_CONNECTION"
+                    ? "No internet connection — connect and try again."
+                    : "Could not check right now (\(reason))."
+                return
+            }
+            let fresh = lookup.value
             if let fresh { live = fresh }
             let stated = fresh?.authorizationStatus?
                 .trimmingCharacters(in: .whitespaces).uppercased() ?? ""
             if !["APPROVED", "DECLINED", "FAILED"].contains(stated) {
                 statusCheckNote = "Still processing — the wallet will keep checking."
             }
-        } catch VeyraWalletError.noNetworkConnection {
-            statusCheckNote = "No internet connection — connect and try again."
         } catch {
             statusCheckNote = "Could not check right now: \(error.localizedDescription)"
         }
@@ -348,14 +354,19 @@ struct TransactionDetailView: View {
         creditCheckNote = nil
         defer { checkingCredit = false }
         do {
-            let fresh = try await VeyraWallet.shared.tokenisation
+            let lookup = try await VeyraWallet.shared.tokenisation
                 .refreshCreditConfirmation(transactionHash: hash)
+            if let reason = lookup.failureReason {
+                creditCheckNote = reason == "NO_NETWORK_CONNECTION"
+                    ? "No internet connection — connect and try again."
+                    : "Could not check right now (\(reason))."
+                return
+            }
+            let fresh = lookup.value
             if let fresh { live = fresh }
             if fresh?.creditConfirmationStatus != "RECEIVED" {
                 creditCheckNote = "Still not confirmed — the wallet will keep checking."
             }
-        } catch VeyraWalletError.noNetworkConnection {
-            creditCheckNote = "No internet connection — connect and try again."
         } catch {
             creditCheckNote = "Could not check right now: \(error.localizedDescription)"
         }

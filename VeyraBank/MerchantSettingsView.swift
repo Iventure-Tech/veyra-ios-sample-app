@@ -107,13 +107,15 @@ struct MerchantSettingsView: View {
 
     private func loadBanks() async {
         do {
-            banks = try await VeyraSoftPOS.shared.merchant.banks()
-        } catch VeyraSoftPOSError.noNetworkConnection {
-            // An empty bank picker on an offline device used to be silent and indistinguishable
-            // from "this backend has no banks". Say which it is — reconnecting is the only thing
-            // that fixes it, and the merchant cannot guess that.
-            banks = []
-            errorText = "No internet connection — reconnect to load settlement banks."
+            let list = try await VeyraSoftPOS.shared.merchant.banks()
+            banks = list.banks
+            // An empty bank picker on an offline device must say why — reconnecting is the only
+            // thing that fixes it, and the merchant cannot guess that.
+            if list.responseStatus != VeyraResponseStatus.approved {
+                errorText = list.responseStatusReason == "NO_NETWORK_CONNECTION"
+                    ? "No internet connection — reconnect to load settlement banks."
+                    : "Could not load settlement banks (\(list.responseStatusReason ?? list.responseStatus))."
+            }
         } catch {
             banks = []
         }
@@ -242,13 +244,21 @@ struct MerchantSettingsView: View {
                     walletAccountID: email.trimmingCharacters(in: .whitespaces).isEmpty ? nil : email.trimmingCharacters(in: .whitespaces)
                 )
             )
-            if result.success {
+            // Every registration ends with an outcome — branch on its status.
+            switch result.responseStatus {
+            case VeyraResponseStatus.approved:
                 // The SDK has persisted the merchant — reload so the screen flips to edit mode
                 // and Home unlocks Get paid on return.
                 resultText = "Registered: \(result.merchantID ?? "?") · terminal \(result.terminalID ?? "?")"
                 load()
-            } else {
-                errorText = result.message ?? "Registration declined"
+            case VeyraResponseStatus.notSent:
+                // Never reached Veyra: fix what the reason names and register again.
+                errorText = "Not sent (\(result.responseStatusReason ?? "?")): \(result.message ?? "")"
+            case VeyraResponseStatus.pending:
+                // Sent, but no usable answer: check the status before registering again.
+                errorText = "No answer yet — check the merchant's status before trying again."
+            default:
+                errorText = "Registration refused (\(result.responseStatusReason ?? result.responseStatus)): \(result.message ?? "")"
             }
         } catch {
             errorText = String(describing: error)

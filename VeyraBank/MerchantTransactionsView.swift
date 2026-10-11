@@ -223,16 +223,22 @@ struct MerchantTransactionsView: View {
         statusCheckNotes[reference] = nil
         defer { checkingStatus = nil }
         do {
-            let fresh = try await VeyraSoftPOS.shared.transactions
+            // A check that could not be made is not thrown: it says why, and the row is unchanged.
+            let lookup = try await VeyraSoftPOS.shared.transactions
                 .refreshStatus(reference: reference)
+            if let reason = lookup.failureReason {
+                statusCheckNotes[reference] = reason == "NO_NETWORK_CONNECTION"
+                    ? "No internet connection — connect and try again."
+                    : "Could not check right now (\(reason))."
+                return
+            }
+            let fresh = lookup.value
             if let fresh, let i = transactions.firstIndex(where: { $0.reference == reference }) {
                 transactions[i] = fresh
             }
             if fresh?.status == "PENDING" {
                 statusCheckNotes[reference] = "Still processing — the SDK will keep checking."
             }
-        } catch VeyraSoftPOSError.noNetworkConnection {
-            statusCheckNotes[reference] = "No internet connection — connect and try again."
         } catch {
             statusCheckNotes[reference] = "Could not check right now: \(error.localizedDescription)"
         }
@@ -255,16 +261,21 @@ struct MerchantTransactionsView: View {
         creditCheckNotes[reference] = nil
         defer { checkingCredit = nil }
         do {
-            let fresh = try await VeyraSoftPOS.shared.transactions
+            let lookup = try await VeyraSoftPOS.shared.transactions
                 .refreshCreditConfirmation(reference: reference)
+            if let reason = lookup.failureReason {
+                creditCheckNotes[reference] = reason == "NO_NETWORK_CONNECTION"
+                    ? "No internet connection — connect and try again."
+                    : "Could not check right now (\(reason))."
+                return
+            }
+            let fresh = lookup.value
             if let fresh, let i = transactions.firstIndex(where: { $0.reference == reference }) {
                 transactions[i] = fresh
             }
             if fresh?.creditConfirmationStatus != "RECEIVED" {
                 creditCheckNotes[reference] = "Still not confirmed — the SDK will keep checking."
             }
-        } catch VeyraSoftPOSError.noNetworkConnection {
-            creditCheckNotes[reference] = "No internet connection — connect and try again."
         } catch {
             creditCheckNotes[reference] = "Could not check right now: \(error.localizedDescription)"
         }

@@ -271,7 +271,13 @@ struct PayView: View {
         working = true
         defer { working = false }
         do {
-            try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
+            let selection = try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
+            // An answer: FAILED / CARD_NOT_FOUND when the card is no longer in this wallet.
+            guard selection.selected else {
+                actionError = "This card can't be selected (\(selection.responseStatusReason ?? selection.responseStatus))."
+                await reload()
+                return
+            }
             observeRefusals(for: tokenUniqueReference)
             await reload()
         } catch {
@@ -357,11 +363,12 @@ struct PayView: View {
 
     /// Why a card removal did not happen. Only a setup mistake throws; every other answer is an outcome.
     private func removalError(_ r: TokenStatusUpdateResponse) -> String {
+        // Card removal is not a payment, so a request that never reached Veyra is FAILED with its
+        // reason (never NOT_SENT): offline is the one worth its own wording.
+        if r.responseStatusReason == "NO_NETWORK_CONNECTION" {
+            return "No internet connection — connect and try again. The card was not removed."
+        }
         switch r.responseStatus {
-        case VeyraResponseStatus.notSent:
-            return r.responseStatusReason == "NO_NETWORK_CONNECTION"
-                ? "No internet connection — connect and try again. The card was not removed."
-                : "The card was not removed (\(r.responseStatusReason ?? "not sent")). Try again."
         case VeyraResponseStatus.pending:
             return "We couldn't confirm the removal yet (\(r.responseStatusReason ?? "pending")). Check again shortly."
         default:

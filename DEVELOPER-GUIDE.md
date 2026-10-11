@@ -179,12 +179,13 @@ Rules that hold for every provider:
   blank `clientId` — never at the first payment. (Swift also makes a type that conforms to both
   pick its own `providerType`, because the two defaults clash.)
 - **One kind per process, with no fallback.** A `VeyraAssertionProvider` whose `assertion` returns `nil`
-  ends the call `NOT_SENT` / `NOT_AUTHENTICATED`; the SDK never tries another method. Configuring again with the
+  ends the call with reason `NOT_AUTHENTICATED` (`NOT_SENT` on a payment or an add-card, `FAILED` on any other call); the SDK never tries another method. Configuring again with the
   other kind throws `.invalidConfiguration`.
 - **Every `configure` re-binds the provider** — the one you pass is the one the SDK uses from then
   on, including from its own background work.
 - **A call is never sent without credentials.** When the SDK cannot obtain a token, the call ends
-  `NOT_SENT` with reason `NOT_AUTHENTICATED` and nothing is sent.
+  with reason `NOT_AUTHENTICATED` and nothing is sent — `NOT_SENT` on a payment or an add-card,
+  `FAILED` on any other call.
 - Every backend call (token requests included) carries `X-Veyra-Sdk-Version` and
   `X-Veyra-Provider-Type` (your provider's `providerType`: `AUTHENTICATION` or `PROXY`).
 
@@ -349,8 +350,8 @@ Issue it only for an authenticated session of the user it names, and rate-limit 
 SDK calls the provider only when it holds no valid token (first call, expiry, or a token the server
 refused), never more than once at a time. `jkt` is the thumbprint of this install's
 proof-of-possession key; the access token is bound to that key, which is generated on the device
-and cannot be exported (Secure Enclave). Returning `nil` or throwing ends the call `NOT_SENT` /
-`NOT_AUTHENTICATED` and sends nothing. `signOut()` drops cached tokens but keeps the per-install key.
+and cannot be exported (Secure Enclave). Returning `nil` or throwing ends the call with reason
+`NOT_AUTHENTICATED` and sends nothing (`NOT_SENT` on a payment or an add-card, `FAILED` on any other call). `signOut()` drops cached tokens but keeps the per-install key.
 
 `audience` is the base URL of the Veyra API the SDK will redeem the assertion at
 (`https://api.uat.veyra.co` on `TEST`, `https://api.veyra.co` on `LIVE`). **Check it before you
@@ -575,13 +576,13 @@ default:
 }
 ```
 
-`MerchantRegistrationResult`: `responseStatus` (`APPROVED` · `FAILED` · `PENDING` · `NOT_SENT`), `responseStatusReason`, `success: Bool` (the same fact as `responseStatus == "APPROVED"`), `merchantID: String?` (set on `APPROVED`), `terminalID: String?`, `merchantStatus: String?`, `message: String?`. Every registration ends with an outcome — validation problems come back as `FAILED` with the field named in `responseStatusReason`; nothing throws but a [setup error](#setup-errors--thrown). A `PENDING` registration may have been made: check `merchant.status(merchantID:)` before registering again.
+`MerchantRegistrationResult`: `responseStatus` (`APPROVED` · `FAILED` · `PENDING`; a registration that never reached Veyra is `FAILED` with the reason, e.g. `NO_NETWORK_CONNECTION`), `responseStatusReason`, `success: Bool` (the same fact as `responseStatus == "APPROVED"`), `merchantID: String?` (set on `APPROVED`), `terminalID: String?`, `merchantStatus: String?`, `message: String?`. Every registration ends with an outcome — validation problems come back as `FAILED` with the field named in `responseStatusReason`; nothing throws but a [setup error](#setup-errors--thrown). A `PENDING` registration may have been made: check `merchant.status(merchantID:)` before registering again.
 
 ---
 
 #### `merchant.banks`
 
-Fetch the NUBAN settlement banks for the registration/update bank picker. A read: it returns a `SettlementBankList` outcome — `APPROVED` with the banks, or `NOT_SENT`/`FAILED` with the reason there are none. Never `PENDING`; retrying as is is always safe.
+Fetch the NUBAN settlement banks for the registration/update bank picker. A read: it returns a `SettlementBankList` outcome — `APPROVED` with the banks, or `FAILED` with the reason there are none (`NO_NETWORK_CONNECTION` when the phone is offline). Never `PENDING`; retrying as is is always safe.
 
 ```swift
 let list = try await VeyraSoftPOS.shared.merchant.banks()   // SettlementBankList
@@ -612,9 +613,8 @@ let banks = list.banks   // [SettlementBank]: slug, name, institutionCode
 | `responseStatus` | Meaning | What to do |
 |---|---|---|
 | `APPROVED` | Answered — `status` is the merchant's state | Render it |
-| `FAILED` | Refused, e.g. `MERCHANT_NOT_FOUND`, or `INVALID_REQUEST` (the change isn't allowed from the current state) | Show the reason |
+| `FAILED` | Refused, e.g. `MERCHANT_NOT_FOUND`, or `INVALID_REQUEST` (the change isn't allowed from the current state) — or it never reached Veyra (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …), so nothing was done | Show the reason; fix it and try again |
 | `PENDING` | Activate / deactivate / update sent with no usable answer | Read `status(merchantID:)` before trying again |
-| `NOT_SENT` | Never reached Veyra (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …) | Fix the reason and try again |
 
 ```swift
 let status = try await VeyraSoftPOS.shared.merchant.activate(merchantID: merchantID)
@@ -640,7 +640,7 @@ let status = try await VeyraSoftPOS.shared.merchant.update(
                    accountNumber: "1234567890", institutionCode: "000000")
 )
 if status.responseStatus != VeyraResponseStatus.approved {
-    showError(status.responseStatusReason ?? status.responseStatus)   // FAILED / PENDING / NOT_SENT
+    showError(status.responseStatusReason ?? status.responseStatus)   // FAILED / PENDING
 }
 ```
 
@@ -776,7 +776,7 @@ The customer shows a payment QR from their Veyra wallet; the merchant scans it, 
 
 #### `payments.inspectCustomerQr`
 
-Decode and validate a scanned payload. Nothing is sent. Returns a `CustomerQrInspection` outcome: `APPROVED` with `qr` set, or `NOT_SENT` / `INVALID_REQUEST` (`qr` is `nil`) when the payload is not a Veyra payment QR — show a transient hint and stay armed for another scan; it is not a terminal failure.
+Decode and validate a scanned payload. Nothing is sent. Returns a `CustomerQrInspection` outcome: `APPROVED` with `qr` set, or `FAILED` / `INVALID_REQUEST` (`qr` is `nil`) when the payload is not a Veyra payment QR — show a transient hint and stay armed for another scan; it is not a terminal failure.
 
 `CustomerQrInspection`: `qr: ScannedCustomerQr?`, `responseStatus`, `responseStatusReason`, `message`. `ScannedCustomerQr`: `maskedCard` (last 4 for display), `amountMinorUnits` (the QR's own amount — confirm, never re-key), `currencyNumeric`, `cardholderName` (the paying card's display name, e.g. `AFRIGO ****1234` — the same value a tap presents; **display only**, it rides outside the QR's cryptogram, so never branch a payment decision on it; `nil` when the QR carries none).
 
@@ -785,7 +785,7 @@ Decode and validate a scanned payload. Nothing is sent. Returns a `CustomerQrIns
 Charge the confirmed QR synchronously over the standard payment rail. A tampered payload or altered amount declines at the server.
 
 ```swift
-// NOT_SENT / INVALID_REQUEST means "not a payment QR": transient hint, stay armed.
+// FAILED / INVALID_REQUEST means "not a payment QR": transient hint, stay armed.
 guard let inspection = try? await VeyraSoftPOS.shared.payments.inspectCustomerQr(payload),
       let scanned = inspection.qr else {
     showHint("Not a payment code — try again")     // stay armed for another scan
@@ -1025,7 +1025,7 @@ if response.isApproved { proceedToDigitise() }
 
 `walletAccountID` is the customer's **registered email address or phone number** — a value the issuer already holds for this account, not an internal id of your own. The SDK derives a hash from it; it is not sent raw. The issuer checks that hash against its own records, so a value it does not know never matches.
 
-`VerifyAccountResponse`: `responseCode` (`"APPROVED"` = eligible), `responseStatus` (what the call did — `"APPROVED"`; `"DECLINED"`, the check ran and the answer is no; `"FAILED"`, it could not be run; `"NOT_SENT"`, it never reached Veyra — `NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …), `responseStatusReason` (the symbolic cause — branch on this), `message` (+ convenience `isApproved`). An eligibility check is a read: it is never `PENDING`, and retrying as is is always safe. See [Table C — Veyra token service](#table-c--veyra-token-service-wallet).
+`VerifyAccountResponse`: `responseCode` (`"APPROVED"` = eligible), `responseStatus` (what the call did — `"APPROVED"`; `"DECLINED"`, the check ran and the answer is no; `"FAILED"`, it could not be run — including when it never reached Veyra: `NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …), `responseStatusReason` (the symbolic cause — branch on this), `message` (+ convenience `isApproved`). An eligibility check is a read: it is never `PENDING`, and retrying as is is always safe. See [Table C — Veyra token service](#table-c--veyra-token-service-wallet).
 
 ---
 
@@ -1105,7 +1105,8 @@ let response = try await VeyraWallet.shared.tokenisation.requestActivationCode(
 | `APPROVED` | The code was sent | Show OTP entry with the countdown |
 | `FAILED` | Refused — `responseStatusReason` is the failure code (e.g. `CODE_REQUEST_RATE_LIMITED`), and `failureCode` carries it typed | Branch on `failureCode`, never on `message`: `.codeRequestRateLimited` — disable "resend" until later but keep the flow open; `.activationLocked` — terminal, end the flow and point the user at their issuer |
 | `PENDING` | Sent, no usable answer — a code may be on its way | Wait before asking again |
-| `NOT_SENT` | Never reached Veyra (`NO_NETWORK_CONNECTION`, …) | Fix the reason and ask again |
+
+A request that never reached Veyra is `FAILED` with that reason (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …) and no `failureCode`: fix the reason and ask again.
 
 Codes are limited-attempt and rate-limited — see [Activation — `failureCode`](#activation--failurecode).
 
@@ -1136,7 +1137,7 @@ default:                                           // FAILED: responseStatusReas
 }
 ```
 
-`ActivateResponse`: `responseStatus` (`APPROVED` activated · `FAILED` refused, with the failure code as `responseStatusReason` · `PENDING` sent with no usable answer — read the token status before trying again · `NOT_SENT` never reached Veyra — retry with the same code), `responseStatusReason`, `tokenUniqueReference`, `status` (`SUCCESS` / `FAILURE`), `message`. Failure fields (all nil unless `FAILED`): `failureCode` — typed `ActivationFailureCode` (`.tokenNotFound`, `.tokenNotActivatable`, `.activationLocked`, `.noPendingActivation`, `.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.codeRequestRateLimited`, `.invalidRequest`, `.activationFailed`, or `.unknown(raw:)` for a code newer than this SDK); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `.must` / `.may` after an exhausted cycle (delete the dead token rather than leaving it in the card list), nil otherwise (raw values in `failureCodeRaw` / `recommendDeleteRaw`).
+`ActivateResponse`: `responseStatus` (`APPROVED` activated · `FAILED` refused, with the failure code as `responseStatusReason` · `PENDING` sent with no usable answer — read the token status before trying again · a request that never reached Veyra is `FAILED` too, with the reason (`NO_NETWORK_CONNECTION`, …) and no `failureCode` — fix it and try the same code again), `responseStatusReason`, `tokenUniqueReference`, `status` (`SUCCESS` / `FAILURE`), `message`. Failure fields (all nil unless `FAILED`): `failureCode` — typed `ActivationFailureCode` (`.tokenNotFound`, `.tokenNotActivatable`, `.activationLocked`, `.noPendingActivation`, `.codeExpired`, `.codeInvalid`, `.maxAttemptsExceeded`, `.codeRequestRateLimited`, `.invalidRequest`, `.activationFailed`, or `.unknown(raw:)` for a code newer than this SDK); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `.must` / `.may` after an exhausted cycle (delete the dead token rather than leaving it in the card list), nil otherwise (raw values in `failureCodeRaw` / `recommendDeleteRaw`).
 
 #### `observeActivation` (+ pause / resume / stop)
 
@@ -1242,11 +1243,20 @@ A deactivated card needs no rendering rule — the SDK removes it from the list 
 
 #### `tokenisation.setActiveToken`
 
-Select the card payments use (at most one card is active).
+Select the card payments use (at most one card is active). The selection happens on the phone —
+nothing is sent — and it answers a `CardSelection`: `APPROVED` (the card is now the one payments
+use), or `FAILED` / `CARD_NOT_FOUND` when no card with that reference is in this wallet. Only a
+[setup error](#setup-errors--thrown) throws.
 
 ```swift
-try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
+let selection = try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
+if !selection.selected {                          // FAILED / CARD_NOT_FOUND
+    actionError = selection.message ?? selection.responseStatusReason
+}
 ```
+
+`CardSelection`: `responseStatus`, `responseStatusReason`, `message`, plus `selected: Bool` (the same
+fact as `responseStatus == "APPROVED"`). The result is `@discardableResult`.
 
 **Tap-to-pay is Android-only** — on iOS the wallet pays by QR (Apple restricts card emulation).
 
@@ -1254,7 +1264,7 @@ try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
 
 | Method | Behaviour |
 |---|---|
-| `deactivateToken(ref)` | Deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active. Returns `TokenStatusUpdateResponse` — `responseStatus` (`APPROVED` · `FAILED` · `PENDING` · `NOT_SENT`), `responseStatusReason`, `status` (the token's state after the call, e.g. `"DEACTIVATED"`, when the server answered), `tokenUniqueReference`, `message`. **Only `APPROVED` removes the card locally**; on any other outcome nothing local changes. Named to match Android and React Native, which call the same operation the same way. |
+| `deactivateToken(ref)` | Deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active. Returns `TokenStatusUpdateResponse` — `responseStatus` (`APPROVED` · `FAILED` · `PENDING`; a removal that never reached Veyra is `FAILED` with the reason, e.g. `NO_NETWORK_CONNECTION`), `responseStatusReason`, `status` (the token's state after the call, e.g. `"DEACTIVATED"`, when the server answered), `tokenUniqueReference`, `message`. **Only `APPROVED` removes the card locally**; on any other outcome nothing local changes. Named to match Android and React Native, which call the same operation the same way. |
 
 There is no call to wipe every card: when a customer logs out, call `signOut()` — their cards stay
 on the device for when they sign in again (see [Customers](#customers-signing-in-signing-out-switching)).
@@ -1267,7 +1277,7 @@ let r = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueRef
 if r.responseStatus == VeyraResponseStatus.approved {
     await reload()                                   // card gone, next one promoted
 } else {
-    // FAILED / NOT_SENT (e.g. NO_NETWORK_CONNECTION) / PENDING — the card is still on the device
+    // FAILED (e.g. NO_NETWORK_CONNECTION) / PENDING — the card is still on the device
     actionError = r.message ?? r.responseStatusReason ?? r.responseStatus
 }
 ```
@@ -1511,10 +1521,16 @@ else if let updated = lookup.value { live = updated }     // nil if unknown here
 
 Reconcile still-`PENDING` rows against the backend **right now**. The SDK's own app-scoped sweep (above) already resolves them without you, so this is the explicit "check again" rather than the mechanism: call it on pull-to-refresh, on returning to the foreground, or on a short loop while a shown QR is on screen for a snappier update than the backoff would give.
 
-Unlike the scheduled sweep it ignores both the backoff and the 30-day window — an explicit ask always reaches the backend, and it is the supported way to check a row the sweep has stopped polling. Failures are still swallowed: a row whose query fails is left exactly as it was.
+Unlike the scheduled sweep it ignores both the backoff and the 30-day window — an explicit ask always reaches the backend, and it is the supported way to check a row the sweep has stopped polling. A row whose own check fails is left exactly as it was.
+
+It is a read, so it states no status of its own: it answers a `ReconcileResult` whose `failureReason` is set only when the reconcile itself could not run (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …) — `checked` is `true` when it ran. Read the updated rows from `transactionHistory` either way. Only a [setup error](#setup-errors--thrown) throws.
 
 ```swift
-try await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
+let reconcile = try await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
+if let reason = reconcile.failureReason {         // the reconcile could not run
+    note = reason == "NO_NETWORK_CONNECTION" ? "No internet connection." : "Could not check right now (\(reason))."
+}
+let rows = try await VeyraWallet.shared.tokenisation.transactionHistory(tokenUniqueReference: card)   // read the updated rows
 ```
 
 #### `refreshTransactionStatus`
@@ -1533,7 +1549,7 @@ if let reason = lookup.failureReason {
 ```
 
 The **per-transaction** counterpart to `reconcilePendingTransactions`, which asks about every open
-row and returns nothing — this one answers about the row the customer is actually looking at, keyed
+row and answers only whether it ran (`ReconcileResult`) — this one answers about the row the customer is actually looking at, keyed
 by its `transactionHash`.
 
 The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30
@@ -1553,12 +1569,31 @@ Scan a merchant's **receipt QR** to store the customer's copy. The SDK decodes, 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `qrPayload` | **Mandatory** | The scanned contents — raw JSON or base64. |
-| `expectedTransactionHash` | Optional | Set it when the scan is launched **from a specific transaction's screen** — a receipt for a different transaction is rejected instead of silently attaching elsewhere. `nil` = unscoped. |
+| `expectedTransactionHash` | Optional | Set it when the scan is launched **from a specific transaction's screen** — a receipt for a different transaction is refused (`RECEIPT_FOR_ANOTHER_TRANSACTION`) instead of silently attaching elsewhere. `nil` = unscoped. |
+
+The receipt is checked and stored **on the phone** — nothing is sent. `processReceipt` answers a `ReceiptScan`; only a [setup error](#setup-errors--thrown) throws:
+
+| `responseStatus` | `responseStatusReason` | Meaning | What to do |
+|---|---|---|---|
+| `APPROVED` | — | The receipt belongs to a payment this wallet made, agrees with it, and is stored in `receipt` | Show it |
+| `FAILED` | `INVALID_RECEIPT` | Not a Veyra receipt QR, or one with a missing or unreadable field | "Not a receipt" — let them scan again |
+| `FAILED` | `RECEIPT_NOT_FROM_THIS_WALLET` | No payment made by this wallet matches it | Tell the customer it isn't theirs |
+| `FAILED` | `RECEIPT_MISMATCH` | It matches a payment, but its amount, currency, date, merchant or reference disagree with this wallet's record | Show the reason; don't store it |
+| `FAILED` | `PAYMENT_NOT_CONFIRMED` | The matching payment's outcome is not confirmed yet | Ask them to scan again shortly |
+| `FAILED` | `RECEIPT_FOR_ANOTHER_TRANSACTION` | A scoped scan (`expectedTransactionHash` set) read a receipt for another transaction | Open the right transaction, or scan unscoped |
+| `FAILED` | `SDK_INTERNAL_ERROR` | The SDK failed inside itself | Report to support |
+
+`ReceiptScan`: `receipt: TransactionReceipt?` (set only on `APPROVED`), `responseStatus`, `responseStatusReason`, `message`, plus `stored: Bool` (`APPROVED` with a receipt). The result is `@discardableResult`.
 
 ```swift
 let base64 = Data(payload.utf8).base64EncodedString()
-let receipt = try await VeyraWallet.shared.tokenisation.processReceipt(
+let scan = try await VeyraWallet.shared.tokenisation.processReceipt(
     base64, expectedTransactionHash: tx.transactionHash)
+if let receipt = scan.receipt {
+    show(receipt)
+} else {
+    scanError = scan.message ?? scan.responseStatusReason   // FAILED / RECEIPT_MISMATCH, …
+}
 
 let receipts = try await VeyraWallet.shared.tokenisation.receipts(limit: 100)
 let linked   = try await VeyraWallet.shared.tokenisation.receipt(forTransactionHash: hash)
@@ -1573,7 +1608,7 @@ The SDK maintains its own cards — no app wiring required. At `configure`, when
 ```swift
 Task {
     try? await VeyraWallet.shared.tokenisation.topUpKeysIfNeeded()
-    try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
+    _ = try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
 }
 ```
 
@@ -1656,10 +1691,22 @@ public enum VeyraResponseStatus {           // import VeyraWallet / VeyraSoftPOS
 |---|---|---|---|---|
 | `"APPROVED"` | It was done | Yes | **No** — the order is paid | Complete the sale / show the card |
 | `"DECLINED"` | It was done, and someone with authority refused (issuer, bank, risk rules). No money moved | Yes | Yes | Show the reason. Don't retry automatically; another card or method can be tried under the **same** order ID |
-| `"FAILED"` | Veyra received it and didn't perform it, and retrying with the same reference won't help | Yes | Yes — except after `94`, where the order is already paid or still being confirmed | Fix what the reason names |
+| `"FAILED"` | Veyra received it and didn't perform it, and retrying with the same reference won't help. On a call that is not a payment or add-card, also: it never reached Veyra, or the phone refused it (the reason says which) | Yes — or, on a non-payment call, maybe not | Yes — except after `94`, where the order is already paid or still being confirmed | Fix what the reason names, then try again |
 | `"PENDING"` | It may have been done; the outcome is not known yet | Maybe | **No** — it might be paid | **Never retry.** The SDK keeps checking and tells you when it's final; you can also find the sale's row by its merchant order ID in history and refresh it |
 | `"RETRY"` | It reached Veyra, but the debit was never requested. Nothing was charged | Yes | Yes | Fix what the reason names, then retry with the **same** order ID |
-| `"NOT_SENT"` | It never reached Veyra (the phone stopped it). Nothing was done | No | Yes | Fix what the reason names (connect, authenticate, …), then retry with the **same** order ID |
+| `"NOT_SENT"` | A payment or add-card never reached Veyra (the phone stopped it). Nothing was done | No | Yes | Fix what the reason names (connect, authenticate, …), then retry with the **same** order ID |
+
+**Only payments and add-card answer `NOT_SENT`.** It exists to tell you that a payment or a
+digitisation never happened, so its reference is still unused and a retry cannot double-charge. The
+calls that can answer it are the card tap (`tap.session`), `payments.chargeCustomerQr`,
+`payments.createContext`, the wallet's `payScannedContext` and `showQrToPay`, and `digitise`.
+**Every other call answers `FAILED` with the same reason** — `NO_NETWORK_CONNECTION`,
+`SDK_UNABLE_TO_CONNECT`, `NOT_AUTHENTICATED`, `INVALID_REQUEST`, `MISSING_MANDATORY_CONFIG`, … keep
+their names: merchant registration, activate / deactivate / update / status and settlement banks;
+wallet banks, `verifyAccount`, `requestActivationCode`, `activate`, `tokenStatus`,
+`deactivateToken`; and the on-phone calls `inspectCustomerQr`, `processReceipt` and `setActiveToken`
+(which never contact Veyra, so can never be "not sent"). Reads that return a `VeyraLookup` carry
+only `failureReason`.
 
 **`NOT_SENT` and `RETRY` are handled the same way:** nothing was charged, so fix the reason and try
 again with the same order ID. The difference is only where it stopped — on the phone (`NOT_SENT`) or
@@ -1667,9 +1714,10 @@ inside Veyra before the bank was asked (`RETRY`) — and `responseStatusReason` 
 
 **The retry rule, in one line per status:**
 
-- `NOT_SENT` / `RETRY` → fix the reason, retry with the **same** merchant order ID.
+- `NOT_SENT` / `RETRY` → fix the reason, retry with the **same** merchant order ID (or, for add-card, the same request).
 - `DECLINED` → show the reason; another card or method can be tried under the **same** order ID.
-- `FAILED` → fix what the reason names. For a payment this is mainly `94` /
+- `FAILED` → fix what the reason names. On a call that is not a payment or add-card, that is
+  all — no reference to keep: fix the reason (connect, sign in, …) and try again. For a payment this is mainly `94` /
   `DUPLICATE_MERCHANT_ORDER_ID`: the order is already paid or still being confirmed, so take no
   further payment for it.
 - `PENDING` → **never retry**; the SDK resolves it and tells you. It is the only status where the
@@ -1829,7 +1877,7 @@ retrying it as is is always safe. Returned by `transactions.status(...)`,
 `tokenisation.refreshCreditConfirmation(transactionHash:)`.
 
 The other reads — the bank lists, `merchant.status`, `tokenStatus`, `verifyAccount` — return the
-triple like any call, but are **never `PENDING`**: a read that got no usable answer is `NOT_SENT`
+triple like any call, but are **never `PENDING`**: a read that got no usable answer is `FAILED`
 with the reason, and is always safe to retry as is.
 
 #### Where the triple lives on each call
@@ -1839,7 +1887,7 @@ with the reason, and is always safe to retry as is.
 | `tap.session(...)` → `.result(_:)` | `TapPaymentResult` | `responseStatus`, `responseStatusReason`, `responseCode`, plus `reference` for the receipt |
 | `payments.chargeCustomerQr(_:merchantOrderID:)` | `CustomerQrChargeOutcome` | `responseStatus`, `responseStatusReason`, `responseCode`; `approved` is `responseStatus == "APPROVED"` |
 | `payments.createContext(...)` | `PaymentContextQR` | `responseStatus`, `responseStatusReason`, `message`; `txRef` / `mpmPayload` / `expiry` / `kid` only on `APPROVED` |
-| `payments.inspectCustomerQr(_:)` | `CustomerQrInspection` | `responseStatus` (`APPROVED`, or `NOT_SENT` / `INVALID_REQUEST` for "not a payment QR"), `responseStatusReason`, `message`, `qr` |
+| `payments.inspectCustomerQr(_:)` | `CustomerQrInspection` | `responseStatus` (`APPROVED`, or `FAILED` / `INVALID_REQUEST` for "not a payment QR"), `responseStatusReason`, `message`, `qr` |
 | `payments.contextStatus(txRef:)` | `VeyraLookup<PaymentContextState>` | `value.state` (the QR's lifecycle — see [QR context states](#qr-context-states)) and `value.responseCode` once settled, or `failureReason`. For the stated status and reason, read the sale's row with `transactions.refreshStatus(reference:)` |
 | `transactions.history(limit:)` | `[MerchantTransaction]` | `status`, `responseCode`, `responseStatusReason` |
 | `transactions.refreshStatus(reference:)` / `refreshCreditConfirmation(reference:)` | `VeyraLookup<MerchantTransaction>` | the row (`status`, `responseCode`, `responseStatusReason`), or `failureReason` |
@@ -1858,15 +1906,20 @@ with the reason, and is always safe to retry as is.
 | `tokenisation.deactivateToken(_:)` | `TokenStatusUpdateResponse` | `responseStatus`, `responseStatusReason`, `message`, `status`; only `APPROVED` removes the card |
 | `tokenisation.tokenStatus(tokenUniqueReference:)` | `TokenStatusResult` | `tokenStatus`, `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
 | `tokenisation.banks(accountNumber:)` | `BankList` | `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
+| `tokenisation.setActiveToken(_:)` | `CardSelection` | `responseStatus` (`APPROVED`, or `FAILED` / `CARD_NOT_FOUND`), `responseStatusReason`, `message`, `selected` |
+| `tokenisation.processReceipt(_:expectedTransactionHash:)` | `ReceiptScan` | `responseStatus` (`APPROVED` or `FAILED` — nothing is sent), `responseStatusReason`, `message`, `receipt` on `APPROVED` |
+| `tokenisation.reconcilePendingTransactions()` | `ReconcileResult` | `failureReason` (only when the reconcile could not run), `message`, `checked`; no status — read the rows from history |
 
 #### Table A — outcomes the SDK itself produces
 
 The SDK only makes up an outcome when nothing on the network gave it one. These are the ones it can
-produce on iOS:
+produce on iOS. **`NOT_SENT` rows apply to payments and add-card only** (see
+[The six statuses](#the-six-statuses)); on any other call the same reason arrives with `FAILED`.
 
 | Status | Code | Reason | When | What your app does |
 |---|---|---|---|---|
-| `NOT_SENT` | — | `INVALID_REQUEST` | An argument is invalid (e.g. a blank `merchantOrderID`, amount ≤ 0), or `inspectCustomerQr` was given something that is not a Veyra payment QR | Fix the call; for a scanned QR, show a hint and stay armed |
+| `NOT_SENT` | — | `INVALID_REQUEST` | An argument is invalid (e.g. a blank `merchantOrderID`, amount ≤ 0) | Fix the call |
+| `FAILED` | — | `INVALID_REQUEST` | `inspectCustomerQr` was given something that is not a Veyra payment QR, or a non-payment call got an invalid argument | For a scanned QR, show a hint and stay armed; otherwise fix the call |
 | `NOT_SENT` | — | `NO_NETWORK_CONNECTION` | The phone has no internet connection | Ask the user to connect; retry with the same order ID |
 | `NOT_SENT` | — | `SDK_UNABLE_TO_CONNECT` | The phone is online but could not connect to Veyra | Try again shortly with the same order ID |
 | `NOT_SENT` | — | `NOT_AUTHENTICATED` | The SDK could not get credentials: your `VeyraAssertionProvider` returned `nil` or threw, your proxy reported a refusal, or the token endpoint refused | Check your provider. With an assertion provider this usually means nobody is signed in to your app — send the user to sign-in, then retry |
@@ -1877,18 +1930,20 @@ produce on iOS:
 | `NOT_SENT` | — | `TOKEN_NOT_ACTIVE` | Wallet: the card is not active (e.g. suspended by the issuer) | Show the card's state. Payments resume by themselves once a status sync sees it active |
 | `NOT_SENT` | — | `AMOUNT_EXCEEDS_CARD_LIMIT` | Wallet: the amount is larger than this card can pay in one go | Offer a smaller amount or another card. Going online does not help |
 | `NOT_SENT` | — | `DEVICE_NOT_BOUND` | Wallet: the card was added on another device, or on this phone before the app was reinstalled | Remove the card and add it again on this phone — the only remedy. Pre-empt it: the card reads `deviceNotBound == true` |
-| `NOT_SENT` | — | `MISSING_MANDATORY_CONFIG` | SoftPOS: the call needs a registered merchant and none is stored on this device | Register the merchant (`merchant.register(_:)`) first |
+| `NOT_SENT` / `FAILED` | — | `MISSING_MANDATORY_CONFIG` | SoftPOS: the call needs a registered merchant and none is stored on this device (`NOT_SENT` on a payment, `FAILED` on any other call) | Register the merchant (`merchant.register(_:)`) first |
 | `NOT_SENT` | — | `MODE_REFUSED` | Combined apps: the other mode's payment is in progress | Wait for it to finish. Never happens in a single-product app |
 | `NOT_SENT` | — | `CARD_READ_FAILED` | Card tap: the card could not be read, so the payment ended before anything was sent | Ask the customer to tap again |
 | `NOT_SENT` | — | `NO_ACTIVE_CARD` | Wallet: no card is set as active (scan-to-pay, show-QR-to-pay) | Ask the user to choose a card |
 | `NOT_SENT` | — | `CARD_CANNOT_SHOW_QR` | Wallet: the active card can't produce a payment QR (show-to-pay) | Use another card |
 | `NOT_SENT` | — | `CARD_CANNOT_PAY` | Wallet: the active card's material can't make a scan-to-pay payment | Remove the card and add it again |
 | `NOT_SENT` | — | `SDK_INTERNAL_ERROR` | The SDK failed before sending | Report to support; retry with the same order ID |
+| `FAILED` | — | `CARD_NOT_FOUND` | Wallet: `setActiveToken` was given a reference that is not in this wallet | Refresh the card list |
+| `FAILED` | — | `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` | Wallet: `processReceipt` refused the scanned receipt (see [`processReceipt`](#tokenisationprocessreceipt--receipts--receiptfortransactionhash)) | Show the reason; for `PAYMENT_NOT_CONFIRMED`, scan again shortly |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | Payments: the request was sent but no answer came back (timeout, connection lost) | Wait; the SDK stores the payment and resolves it |
 | `PENDING` | `06` | `UPSTREAM_ERROR` | Payments: Veyra answered with an error or something unreadable | Wait; the SDK stores the payment and resolves it |
 | `PENDING` | — | `SDK_INTERNAL_ERROR` | Payments: the SDK failed after sending | Wait; the SDK still resolves the payment |
 | `PENDING` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` / `SDK_INTERNAL_ERROR` | Calls that change state (merchant registration, activate, deactivate, update; QR creation; activation; card removal): sent, no usable answer | Don't repeat blindly: read the state first (`merchant.status`, `tokenStatus`); for a QR, create a new one |
-| `NOT_SENT` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` / `SDK_INTERNAL_ERROR` | Reads (bank lists, `merchant.status`, `tokenStatus`, `verifyAccount`): no usable answer. A read changes nothing, so it is never `PENDING` | Retry as is |
+| `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` / `SDK_INTERNAL_ERROR` | Reads (bank lists, `merchant.status`, `tokenStatus`, `verifyAccount`): no usable answer. A read changes nothing, so it is never `PENDING` | Retry as is |
 | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` / `SDK_INTERNAL_ERROR` | **Add-card only:** no usable answer after sending. Never `PENDING` — the card's keys can never be delivered later | Start a new digitisation |
 | `FAILED` | — | `UNRECOGNISED_RESPONSE_CODE` | **Add-card only:** the token service answered with a code this SDK version doesn't know. The card was discarded and nothing was stored, even if the answer carried token data | Start a new add-card; update the SDK if it persists. `message` quotes the raw code |
 
@@ -2009,10 +2064,10 @@ to be `FAILED` because the payment stopped before the bank was asked (`07`, `12`
 `91`) is now `RETRY`, with the same code and reason.
 
 **Payment status lookups** (`transactions.refreshStatus(reference:)`,
-`tokenisation.refreshTransactionStatus(transactionHash:)`, `reconcilePendingTransactions()`) return
+`tokenisation.refreshTransactionStatus(transactionHash:)`, and the rows `reconcilePendingTransactions()` updates) carry
 the stored payment's triple from this table, or `25` / `RETRY` / `UNABLE_TO_LOCATE_RECORD` — no such
 payment, so nothing was charged and the order can be paid. If the
-lookup itself fails, the `VeyraLookup` carries a `failureReason` and the payment is left as it was
+lookup itself fails, the `VeyraLookup` (or `ReconcileResult`) carries a `failureReason` and the payment is left as it was
 (the SDK's own sweep tries again) — a failed lookup is never the payment's outcome.
 
 #### Table C — Veyra token service (wallet)
@@ -2110,8 +2165,8 @@ specific cause from a `DECLINED` alone.
 `ActivationCodeResponse` and `ActivateResponse` carry the outcome as `responseStatus` /
 `responseStatusReason` like every other call. On `FAILED` the reason **is** the failure code, and the
 typed `failureCode` (`ActivationFailureCode`) carries it with the wire value in `failureCodeRaw`;
-`status` (`"SUCCESS"` / `"FAILURE"`) is still there. **Branch on `responseStatus` first** — `NOT_SENT`
-(never reached Veyra: retry) and `PENDING` (no usable answer: wait, or read the token status) have no
+`status` (`"SUCCESS"` / `"FAILURE"`) is still there. **Branch on `responseStatus` first** — a `FAILED`
+that never reached Veyra (`NO_NETWORK_CONNECTION`, …: fix it and retry) and `PENDING` (no usable answer: wait, or read the token status) have no
 `failureCode` — then, on `FAILED`, on `failureCode`, never on `message`:
 
 | `failureCode` | Meaning | What to do |
@@ -2129,7 +2184,9 @@ typed `failureCode` (`ActivationFailureCode`) carries it with the wire value in 
 #### Table D — Veyra payment gateway, non-payment calls (SoftPOS)
 
 `VeyraSoftPOS` only: merchant and QR codes. Status is `FAILED` for every row; there is no
-`responseCode`.
+`responseCode`. A merchant call that never reached the gateway is `FAILED` too, with the SDK's own
+reason (`NO_NETWORK_CONNECTION`, `SDK_UNABLE_TO_CONNECT`, `NOT_AUTHENTICATED`, …) — only QR creation,
+a payment, says `NOT_SENT` for that.
 
 | Call | Reasons | What your app does |
 |---|---|---|
@@ -2232,21 +2289,26 @@ Move each `catch` branch to a `responseStatus` / `responseStatusReason` branch:
 
 | 2.x thrown error | 3.0.0 outcome |
 |---|---|
-| `.requestFailed(message:)` | Retired. Depending on what happened: `NOT_SENT` / `SDK_UNABLE_TO_CONNECT` (the phone could not reach Veyra) or `NOT_SENT` / `SDK_INTERNAL_ERROR`; `PENDING` / `NO_RESPONSE_RECEIVED` or `UPSTREAM_ERROR` for a payment or a state change that was sent; `FAILED` / the same reasons for add-card; `NOT_SENT` / the same reasons for a read; or the backend's own `FAILED` / `DECLINED` with its reason |
-| `.noNetworkConnection` | `NOT_SENT` / `NO_NETWORK_CONNECTION` (`failureReason` on a `VeyraLookup`) |
+| `.requestFailed(message:)` | Retired. Depending on what happened: `NOT_SENT` / `SDK_UNABLE_TO_CONNECT` (the phone could not reach Veyra) or `NOT_SENT` / `SDK_INTERNAL_ERROR` on a payment or add-card — `FAILED` with the same reasons on any other call; `PENDING` / `NO_RESPONSE_RECEIVED` or `UPSTREAM_ERROR` for a payment or a state change that was sent; `FAILED` / the same reasons for add-card; `FAILED` / the same reasons for a read; or the backend's own `FAILED` / `DECLINED` with its reason |
+| `.noNetworkConnection` | `NOT_SENT` / `NO_NETWORK_CONNECTION` on a payment or add-card; `FAILED` / `NO_NETWORK_CONNECTION` on any other call (`failureReason` on a `VeyraLookup`) |
 | `.authenticationCancelled` / `.authenticationFailed` / `.authenticationUnavailable` | `NOT_SENT` / `AUTH_CANCELLED` / `AUTH_FAILED` / `AUTH_UNAVAILABLE` |
-| `.notAuthenticated` | `NOT_SENT` / `NOT_AUTHENTICATED` |
+| `.notAuthenticated` | `NOT_SENT` / `NOT_AUTHENTICATED` on a payment or add-card; `FAILED` / `NOT_AUTHENTICATED` on any other call |
 | `.onlineRequired` | `NOT_SENT` / `ONLINE_REQUIRED` |
 | `.tokenNotActive` | `NOT_SENT` / `TOKEN_NOT_ACTIVE` |
 | `.amountExceedsCardLimit` | `NOT_SENT` / `AMOUNT_EXCEEDS_CARD_LIMIT` |
 | `.deviceNotBound` | `NOT_SENT` / `DEVICE_NOT_BOUND` |
 | `.unrecognisedResponseCode(message:)` | `FAILED` / `UNRECOGNISED_RESPONSE_CODE` on `DigitiseResult` |
 | `.tapRefused(message:)` | `NOT_SENT` / `MODE_REFUSED`, delivered as the tap's `.result` — `start()` no longer throws it |
-| `.invalidRequest` | `NOT_SENT` / `INVALID_REQUEST` (a blank `merchantOrderID`; "not a payment QR" from `inspectCustomerQr`) |
+| `.invalidRequest` | `NOT_SENT` / `INVALID_REQUEST` (a blank `merchantOrderID`); `FAILED` / `INVALID_REQUEST` ("not a payment QR" from `inspectCustomerQr`, or a bad argument on any other non-payment call) |
+| A thrown error from `processReceipt` (a receipt that was not this wallet's, or did not match) | `ReceiptScan` with `FAILED` and `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` |
+| A thrown error from `reconcilePendingTransactions` | `ReconcileResult.failureReason` |
+| A thrown error from `setActiveToken` (the card is not in this wallet) | `CardSelection` with `FAILED` / `CARD_NOT_FOUND` |
 | None — new in 3.0.0. 2.x had no duplicate-order error: nothing checked a reused order ID (see the next table) | `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` (`94` on a payment) — the order is already paid or being confirmed; take no further payment for it |
 
 Return types changed with it: `merchant.banks()` → `SettlementBankList`, `tokenisation.banks(...)` →
 `BankList`, `tokenStatus(...)` → `TokenStatusResult`, `inspectCustomerQr(_:)` → `CustomerQrInspection`,
+`processReceipt(...)` → `ReceiptScan` (was `TransactionReceipt`), `reconcilePendingTransactions()` →
+`ReconcileResult` (was `Void`), `setActiveToken(_:)` → `CardSelection` (was `Void`),
 the checks (`refreshStatus`, `refreshCreditConfirmation`, `transactions.status`,
 `creditConfirmation`, `contextStatus`, `refreshTransactionStatus`) → `VeyraLookup`, and
 `PaymentContextQR` / `PaymentQr` carry their outcome with optional payload fields.
@@ -2477,7 +2539,13 @@ public enum ActivationFailureCode {
 public enum RecommendDelete { case must, may, unknown(raw: String) }
 public struct TokenStatusUpdateResponse {   // deactivateToken — only APPROVED removes the card locally
     let tokenUniqueReference: String?; let status: String?; let message: String?
-    let responseStatus: String; let responseStatusReason: String?
+    let responseStatus: String; let responseStatusReason: String?   // APPROVED/FAILED/PENDING
+}
+public struct CardSelection {               // setActiveToken — on the phone, nothing is sent
+    let responseStatus: String              // APPROVED, or FAILED
+    let responseStatusReason: String?       // CARD_NOT_FOUND on FAILED
+    let message: String?
+    var selected: Bool                      // responseStatus == "APPROVED"
 }
 
 public enum ScanInspection { case verified(VerifiedPayment); case rejected(ScanRejectionReason, detail: String?) }
@@ -2525,6 +2593,19 @@ public struct TransactionSummary {          // wallet history row
     let creditedAt: String?                    // when the bank posted the credit (RECEIVED only)
     let bankReference: String?                 // the bank's own reference   (RECEIVED only)
 }
+public struct ReceiptScan {                 // processReceipt — checked on the phone, nothing is sent
+    let receipt: TransactionReceipt?        // set only on APPROVED
+    let responseStatus: String              // APPROVED, or FAILED
+    let responseStatusReason: String?       // INVALID_RECEIPT / RECEIPT_NOT_FROM_THIS_WALLET / RECEIPT_MISMATCH /
+                                            // PAYMENT_NOT_CONFIRMED / RECEIPT_FOR_ANOTHER_TRANSACTION / SDK_INTERNAL_ERROR
+    let message: String?
+    var stored: Bool                        // APPROVED with a receipt
+}
+public struct ReconcileResult {             // reconcilePendingTransactions — a read: no status of its own
+    let failureReason: String?              // set only when the reconcile itself could not run
+    let message: String?
+    var checked: Bool                       // failureReason == nil
+}
 public struct TransactionReceipt {
     /* merchantName, merchantId, merchantAddress, transactionType, transactionStatus,
        transactionTime, totalAmount, totalAmountFormatted, currency, maskedToken,
@@ -2537,7 +2618,7 @@ public struct SettlementBank { let slug: String; let name: String; let instituti
 public struct SettlementBankList { let banks: [SettlementBank]; let responseStatus: String; let responseStatusReason: String?; let message: String? }   // never PENDING
 public struct MerchantRegistration { /* see Merchant registration */ }
 public struct MerchantRegistrationResult {
-    let responseStatus: String; let responseStatusReason: String?   // APPROVED/FAILED/PENDING/NOT_SENT
+    let responseStatus: String; let responseStatusReason: String?   // APPROVED/FAILED/PENDING
     let success: Bool                       // == (responseStatus == "APPROVED")
     let merchantID: String?; let terminalID: String?; let merchantStatus: String?; let message: String?
 }
@@ -2572,7 +2653,7 @@ public struct PaymentContextQR {            // createContext — txRef/expiry/ki
     let originalPayment: OriginalPayment?   // on DUPLICATE_MERCHANT_ORDER_ID only
 }
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }   // contextStatus → VeyraLookup<PaymentContextState>
-public struct CustomerQrInspection { let qr: ScannedCustomerQr?; let responseStatus: String; let responseStatusReason: String?; let message: String? }   // APPROVED, or NOT_SENT / INVALID_REQUEST
+public struct CustomerQrInspection { let qr: ScannedCustomerQr?; let responseStatus: String; let responseStatusReason: String?; let message: String? }   // APPROVED, or FAILED / INVALID_REQUEST
 public struct ScannedCustomerQr { let maskedCard: String; let amountMinorUnits: Int64; let currencyNumeric: String; let cardholderName: String? }
 public struct CustomerQrChargeOutcome {
     let approved: Bool                      // responseStatus == "APPROVED" — never worked out from the code
@@ -2601,12 +2682,12 @@ User enters account number
         │
         ▼
   banks(accountNumber:)  ──►  user picks their bank (institutionCode)
-        │                     (NOT_SENT → show the reason, retry as is)
+        │                     (FAILED → show the reason, retry as is)
         ▼
   verifyAccount
         │
-        ├─ NOT_SENT ──► fix the reason (connect…), check again
-        ├─ DECLINED / FAILED ──► show the reason (flow ends)
+        ├─ FAILED / NO_NETWORK_CONNECTION … ──► fix the reason (connect…), check again
+        ├─ DECLINED / other FAILED ──► show the reason (flow ends)
         │
         ▼ APPROVED
     digitise                       (never PENDING)
@@ -2639,7 +2720,7 @@ User enters account number
     activate                  onActivated                onTimeout
         │                  → wallet home ✓         → "still pending" hint;
         ├─ APPROVED ──► card active ✓                SDK keeps checking
-        ├─ NOT_SENT ──► retry with the same code
+        ├─ FAILED, no failureCode ──► fix the reason (connect…); retry the same code
         └─ FAILED ────► branch on failureCode (wrong code — retry, …)
 ```
 
@@ -2664,7 +2745,7 @@ Merchant registered & ACTIVE? ──no──► register / activate first
         │                                       contextStatus until APPROVED / DECLINED /
         │                                       EXPIRED (onExpired blanks the code)
         │
-        └────── Scan the customer's QR ─────► inspectCustomerQr (NOT_SENT → "not a
+        └────── Scan the customer's QR ─────► inspectCustomerQr (FAILED → "not a
                                                 payment code", stay armed) → confirm the
                                                 QR's own amount → chargeCustomerQr
                                                 → branch on responseStatus

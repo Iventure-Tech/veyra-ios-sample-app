@@ -72,7 +72,7 @@ struct MerchantTransactionsView: View {
     /// Final statuses have receipts; a
     /// PENDING row shows no control rather than a dead tap.
     private static func hasReceipt(_ tx: MerchantTransaction) -> Bool {
-        tx.status == "APPROVED" || tx.status == "DECLINED" || tx.status == "FAILED"
+        ["APPROVED", "DECLINED", "FAILED", "RETRY"].contains(tx.status)
     }
 
     private func row(_ tx: MerchantTransaction) -> some View {
@@ -298,7 +298,8 @@ struct MerchantTransactionsView: View {
     private func statusColor(_ status: String) -> Color {
         switch status {
         case "APPROVED": return .green
-        case "DECLINED", "FAILED": return .red
+        // RETRY: final, nothing was charged; the same order ID can be used again.
+        case "DECLINED", "FAILED", "RETRY": return .red
         default: return .yellow
         }
     }

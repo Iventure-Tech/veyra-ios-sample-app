@@ -104,9 +104,10 @@ enum SampleData {
     /// A stand-in for the till's own order/basket/invoice id, which a real integration would take
     /// from its POS rather than generate here.
     ///
-    /// Required, and unique per merchant across all its payments, whatever their outcome: the
-    /// gateway refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`, so a retry needs a new
-    /// order id. The **reference** itself is the SDK's to mint and arrives on the
+    /// Required. An order can have several attempts: after `NOT_SENT`, `RETRY`, `DECLINED` or
+    /// `FAILED` no money moved and the retry reuses the same order id; after `APPROVED` or `PENDING`
+    /// the gateway refuses another payment for it (`DUPLICATE_MERCHANT_ORDER_ID`), so a new sale needs
+    /// a new one. The **reference** itself is the SDK's to mint and arrives on the
     /// response; an app that invents one is keying its receipts off a value no gateway has seen.
     static func nextOrderID() -> String {
         "ORDER-\(Int(Date().timeIntervalSince1970 * 1000))"

@@ -84,9 +84,9 @@ struct GetPaidView: View {
     @State private var tapState: TapState = .waiting
     @State private var tapHint: String?
     @State private var tapSession: TapPaymentSession?
-    // The retry rule for your order ID: an outcome that never reached Veyra (NOT_SENT) leaves the
-    // order ID unused, so the retry reuses it; every other outcome used it up, so the next attempt
-    // takes a fresh one.
+    // The retry rule for your order ID: an order can have several attempts. After NOT_SENT, RETRY,
+    // DECLINED or FAILED no money moved, so the retry reuses it; after APPROVED or PENDING (or a
+    // status this build does not know) the order is paid or may be, so the next sale takes a fresh one.
     @State private var retryOrderID: String?
     @State private var currentOrderID = ""
     // "This can no longer be cancelled" — shown when Cancel arrives after the request has left the
@@ -428,8 +428,8 @@ struct GetPaidView: View {
                         qrState = .failed("This payment code has expired — please start a new payment")
                         scheduleAutoReturn()
                     },
-                    // Your own order id — required, and unique across all of the merchant's
-                    // payments (a retry needs a new one). The transaction reference is the SDK's to mint.
+                    // Your own order id — required; a retry after an attempt that moved no money
+                    // reuses it. The transaction reference is the SDK's to mint.
                     merchantOrderID: takeOrderID()
                 )
                 settleOrderID(responseStatus: context.responseStatus)
@@ -597,7 +597,7 @@ struct GetPaidView: View {
         }
     }
 
-    /// The order ID for this attempt: the unused one from a NOT_SENT outcome, or a fresh one.
+    /// The order ID for this attempt: the one kept from an attempt that moved no money, or a fresh one.
     private func takeOrderID() -> String {
         let id = retryOrderID ?? SampleData.nextOrderID()
         retryOrderID = nil
@@ -605,10 +605,12 @@ struct GetPaidView: View {
         return id
     }
 
-    /// After an outcome: keep the order ID for the retry only when nothing was done (NOT_SENT or RETRY).
+    /// After an outcome: an order can have several attempts, so keep the order ID for the retry unless
+    /// the order is paid or may be — after NOT_SENT, RETRY, DECLINED or FAILED no money moved.
     private func settleOrderID(responseStatus: String?) {
-        retryOrderID = responseStatus == VeyraResponseStatus.notSent || responseStatus == VeyraResponseStatus.retry
-            ? currentOrderID : nil
+        let reusable = [VeyraResponseStatus.notSent, VeyraResponseStatus.retry,
+                        VeyraResponseStatus.declined, VeyraResponseStatus.failed]
+        retryOrderID = responseStatus.map(reusable.contains) == true ? currentOrderID : nil
     }
 
     /// Arm the CoreNFC reader for one tap; kernel dialogue events drive the screen —
@@ -622,8 +624,8 @@ struct GetPaidView: View {
         creditConfirmState = nil
         let session = VeyraSoftPOS.shared.tap.session(
             amountMinorUnits: amountMinorUnits ?? 0,
-            // Your own order id — required and unique across the merchant's payments; reused only
-            // to retry a NOT_SENT outcome. The transaction reference is the SDK's to mint.
+            // Your own order id — required; reused to retry an attempt that moved no money (NOT_SENT,
+            // RETRY, DECLINED, FAILED). The transaction reference is the SDK's to mint.
             merchantOrderID: takeOrderID()
         ) { event in
             switch event {
@@ -800,7 +802,7 @@ struct GetPaidView: View {
             do {
                 let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(
                     scanned,
-                    // Yours, never a key — reused only to retry a NOT_SENT outcome.
+                    // Yours, never a key — reused to retry an attempt that moved no money.
                     merchantOrderID: takeOrderID()
                 )
                 settleOrderID(responseStatus: outcome.responseStatus)
@@ -1008,7 +1010,6 @@ private struct TapOutcome {
         case "NOT_SENT", "RETRY":
             // NOT_SENT never reached Veyra; RETRY reached it but was not sent to the bank. Either
             // way nothing was charged; retry with the same order.
-            // Never reached Veyra — nothing was charged; retry with the same order.
             icon = "arrow.clockwise.circle.fill"; color = .orange
             title = "Payment not sent"
             message = reason == "NO_NETWORK_CONNECTION"

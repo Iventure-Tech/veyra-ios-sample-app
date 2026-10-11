@@ -251,9 +251,6 @@ struct MerchantSettingsView: View {
                 // and Home unlocks Get paid on return.
                 resultText = "Registered: \(result.merchantID ?? "?") · terminal \(result.terminalID ?? "?")"
                 load()
-            case VeyraResponseStatus.notSent:
-                // Never reached Veyra: fix what the reason names and register again.
-                errorText = "Not sent (\(result.responseStatusReason ?? "?")): \(result.message ?? "")"
             case VeyraResponseStatus.pending:
                 // Sent, but no usable answer: check the status before registering again.
                 errorText = "No answer yet — check the merchant's status before trying again."

@@ -267,8 +267,13 @@ struct TransactionDetailView: View {
         do {
             // This scan was launched FROM this transaction — the SDK rejects a receipt
             // belonging to any other transaction instead of silently linking it elsewhere.
-            let receipt = try await VeyraWallet.shared.tokenisation.processReceipt(
+            let scan = try await VeyraWallet.shared.tokenisation.processReceipt(
                 base64, expectedTransactionHash: tx.transactionHash)
+            // An answer: APPROVED with the stored receipt, or FAILED with the reason.
+            guard let receipt = scan.receipt, scan.stored else {
+                scanError = "\(scan.message ?? "Could not process the receipt") (\(scan.responseStatusReason ?? scan.responseStatus))"
+                return
+            }
             linkedReceipt = receipt
             showingReceipt = true
         } catch {

@@ -381,7 +381,8 @@ proxy provider receives is one JSON string that says everything about the call:
 - New fields may be added under the same `version`; a breaking change bumps `version`.
 - When your proxy backend itself cannot complete a call it answers `200` with
   `{"response_status": "PROXY_FAILED", "response_status_reason": "…", "never_sent": true|false}`.
-  Return that body unchanged like any other: the SDK recognises it.
+  Return that body unchanged like any other: the SDK recognises it. `never_sent: true` ends the
+  call as a refused connection does (below); `false` or absent, as a timeout does.
 - **Return Veyra's response body exactly as Veyra returned it.** If Veyra answered with a non-200
   status, throw `VeyraRelayError(kind: .other, neverSent: false, httpStatus: status)` rather than
   inventing a body — the SDK treats it exactly as that status on a direct connection.
@@ -392,8 +393,9 @@ A proxy provider signals failure by throwing `VeyraRelayError(kind:neverSent:htt
 whether the request was sent**:
 
 - `neverSent: true` **only** when the request provably never left the device — no network, or the
-  connection was refused before anything was written. The call then ends `NOT_SENT` with reason
-  `SDK_UNABLE_TO_CONNECT`, or `NO_NETWORK_CONNECTION` when the kind is `.noNetwork`.
+  connection was refused before anything was written. A payment or a digitisation then ends
+  `NOT_SENT` / `SDK_UNABLE_TO_CONNECT` (retry with the same order ID); any other call ends `FAILED` /
+  `SDK_UNABLE_TO_CONNECT`. When the kind is `.noNetwork` the reason is `NO_NETWORK_CONNECTION` instead.
 - `neverSent: false` when it may have been delivered — a timeout, a lost connection, a non-2xx
   answer, or whenever you cannot tell. The payment stays `PENDING` and the SDK reconciles it. **When
   in doubt, `false`**: it is the safe direction.
@@ -2241,7 +2243,7 @@ Move each `catch` branch to a `responseStatus` / `responseStatusReason` branch:
 | `.unrecognisedResponseCode(message:)` | `FAILED` / `UNRECOGNISED_RESPONSE_CODE` on `DigitiseResult` |
 | `.tapRefused(message:)` | `NOT_SENT` / `MODE_REFUSED`, delivered as the tap's `.result` — `start()` no longer throws it |
 | `.invalidRequest` | `NOT_SENT` / `INVALID_REQUEST` (a blank `merchantOrderID`; "not a payment QR" from `inspectCustomerQr`) |
-| `.duplicateMerchantOrderID` | `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` (`94` on a payment) — the order is already paid or being confirmed; take no further payment for it |
+| None — new in 3.0.0. 2.x had no duplicate-order error: nothing checked a reused order ID (see the next table) | `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` (`94` on a payment) — the order is already paid or being confirmed; take no further payment for it |
 
 Return types changed with it: `merchant.banks()` → `SettlementBankList`, `tokenisation.banks(...)` →
 `BankList`, `tokenStatus(...)` → `TokenStatusResult`, `inspectCustomerQr(_:)` → `CustomerQrInspection`,

@@ -366,23 +366,26 @@ struct GetPaidView: View {
                     qrTask?.cancel()
                     stopCreditConfirmationWatch()
                     returnToHome()
-                } else {
-                    // While the QR is being created, cancel it by its order ID; once it is live
-                    // there is nothing in flight and the answer is "no payment" — just go back.
+                } else if case .creating = qrState {
+                    // While the QR is being created, cancel the create by its order ID.
                     cancelPayment {
                         qrTask?.cancel()
                         stopCreditConfirmationWatch()
                         page = .amountEntry
                     }
+                } else {
+                    // The QR is showing: nothing is in flight on the phone — just leave.
+                    qrTask?.cancel()
+                    stopCreditConfirmationWatch()
+                    page = .amountEntry
                 }
             }
             .buttonStyle(.bordered)
         }
         .padding()
         .onDisappear {
-            // Leaving the screen: stop a create still on the phone (by order ID) — a no-op answer
-            // once the QR is live or settled.
-            if !qrFinished { _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) }
+            // Leaving the screen: stop a create still on the phone (by order ID).
+            if case .creating = qrState { _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) }
             qrTask?.cancel()
             stopCreditConfirmationWatch()
             // Stop the SDK expiry watch so its callback can't fire into a dismissed view.

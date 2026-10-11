@@ -37,8 +37,6 @@ struct ScanToPayView: View {
     /// Set while authentication/pay fails without leaving confirm (stay on confirm).
     @State private var confirmError: String?
     @State private var scanRejection: String?
-    /// "This can no longer be cancelled" — the payment has left the phone; keep waiting.
-    @State private var cancelNote: String?
 
     var body: some View {
         Group {
@@ -150,25 +148,23 @@ struct ScanToPayView: View {
             }
             .disabled(busy)
             .padding(.horizontal, 24)
-            if let cancelNote {
-                Text(cancelNote).font(.footnote).foregroundStyle(.orange)
+            // Before Pay, Cancel just closes. While paying it cancels by the merchant order ID
+            // signed into the QR; a QR without one cannot be cancelled, so Cancel is disabled.
+            Button("Cancel") {
+                if busy, let orderID = payment.merchantOrderID, !orderID.isEmpty {
+                    cancelPayment(merchantOrderID: orderID)
+                } else {
+                    dismiss()
+                }
             }
-            if !busy {
-                Button("Cancel") { dismiss() }
-                    .foregroundStyle(.secondary)
-            } else if let orderID = payment.merchantOrderID, !orderID.isEmpty {
-                // Paying: cancel by the merchant order ID signed into the QR. A QR without one
-                // cannot be cancelled, so the button is hidden.
-                Button("Cancel payment") { cancelPayment(merchantOrderID: orderID) }
-                    .foregroundStyle(.secondary)
-            }
+            .disabled(busy && (payment.merchantOrderID ?? "").isEmpty)
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func pay(_ payment: VerifiedPayment) async {
         confirmError = nil
-        cancelNote = nil
         // No authentication call here — payScannedContext raises the system Face ID / Touch ID
         // sheet itself, naming this merchant and amount, and answers with a typed authentication
         // error if the customer cancels or it fails.
@@ -232,9 +228,10 @@ struct ScanToPayView: View {
             // `pay` receives NOT_SENT / CANCELLED and leaves the screen.
             break
         case .tooLateToCancelRequestAlreadySent:
-            cancelNote = "This can no longer be cancelled"
+            // The payment has left the phone: say so in the reason text and keep waiting.
+            confirmError = "This can no longer be cancelled"
         case .tooLateToCancelTaskAlreadyProcessed:
-            // Already finished: its result is the answer, and `pay` shows it.
+            // Already finished: keep waiting — `pay` shows its result.
             break
         case .noPaymentInProgressForOrderID, .noDigitisationInProgressForClientRequestID:
             // Nothing running under this order ID: just go back.

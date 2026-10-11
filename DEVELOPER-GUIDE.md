@@ -1309,7 +1309,7 @@ case .rejected(let reason, _): showRejected(reason)          // .malformed/.miss
 }
 ```
 
-The verified context carries `merchantName`, `merchantCity`, `amount` (display string), `amountMinorUnits`, `currencyNumeric`, `txRef`, `expiryEpochSeconds` — render these on the confirm screen; the customer never keys an amount — and `merchantOrderID`, the merchant's order ID signed into the QR, which `cancelPayment(merchantOrderID:)` names to cancel the payment while it is still on the phone (`nil` on a QR that carries none: offer no Cancel).
+The verified context carries `merchantName`, `merchantCity`, `amount` (display string), `amountMinorUnits`, `currencyNumeric`, `txRef`, `expiryEpochSeconds` — render these on the confirm screen; the customer never keys an amount — and `merchantOrderID`, the merchant's order ID signed into the QR, which `cancelPayment(merchantOrderID:)` names to cancel the payment while it is still on the phone (`nil` on a QR that carries none: disable Cancel while it is paying).
 
 #### Device authentication (CDCVM) — the SDK asks, you don't
 
@@ -1635,7 +1635,7 @@ Every cancel names the call by a **reference you already hold**:
 | Call | Cancel with | Reference |
 |---|---|---|
 | Card tap (`tap.session`), customer-QR charge (`payments.chargeCustomerQr`), get-paid QR create (`payments.createContext`) | `VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID:)` | The `merchantOrderID` the payment was started with. You don't say which rail: the order ID identifies the payment |
-| Scan to pay (`tokenisation.payScannedContext`) | `VeyraWallet.shared.tokenisation.cancelPayment(merchantOrderID:)` | `VerifiedPayment.merchantOrderID` — the order ID signed into the scanned QR. `nil` on a QR that carries none: that payment cannot be cancelled (hide your Cancel button) |
+| Scan to pay (`tokenisation.payScannedContext`) | `VeyraWallet.shared.tokenisation.cancelPayment(merchantOrderID:)` | `VerifiedPayment.merchantOrderID` — the order ID signed into the scanned QR. `nil` on a QR that carries none: that payment cannot be cancelled (disable your Cancel button while it is paying) |
 | Add a card (`tokenisation.digitise`) | `VeyraWallet.shared.tokenisation.cancelDigitise(clientRequestID:)` | The `clientRequestID` you passed to `digitise`. Pass none and the SDK generates one, and that add-card cannot be cancelled by reference |
 
 The merchant's and the wallet's payments are kept apart: in a combined app the wallet's
@@ -1662,7 +1662,7 @@ event), exactly once.
 |---|---|---|
 | `.cancelled` | The call was stopped before anything was sent. Its result arrives as `NOT_SENT` / `CANCELLED` | Go back to the previous screen when that result arrives. The same order ID or `clientRequestID` can be used again |
 | `.tooLateToCancelRequestAlreadySent` | The request has already left the phone. The call carries on | "This can no longer be cancelled" — keep waiting, and show the call's own result (approved, declined, pending…) when it arrives |
-| `.tooLateToCancelTaskAlreadyProcessed` | The call had already finished | Nothing to do: show the result it delivered |
+| `.tooLateToCancelTaskAlreadyProcessed` | The call had already finished | No message: keep waiting for (or keep showing) the result it delivered |
 | `.noPaymentInProgressForOrderID` | No payment with that order ID is armed or running on this phone (wrong ID, never started, already finished, or a scanned QR with no order ID) | Just go back |
 | `.noDigitisationInProgressForClientRequestID` | No add-card with that `clientRequestID` is running (wrong ID, started without one, or already finished) | Just go back |
 
@@ -1674,7 +1674,7 @@ case .cancelled:
 case .tooLateToCancelRequestAlreadySent:
     hint = "This can no longer be cancelled" // keep waiting for the result
 case .tooLateToCancelTaskAlreadyProcessed:
-    break                                    // its result is already on screen
+    break                                    // already finished: keep waiting for its result, no message
 case .noPaymentInProgressForOrderID, .noDigitisationInProgressForClientRequestID:
     goBack()                                 // nothing in flight
 }
@@ -1712,13 +1712,13 @@ Everything **before sending** can be cancelled; **once the request is sent, noth
 |---|---|---|
 | Card tap (merchant) | Arming the reader and waiting for a tap; reading the card; the window after the card is read (`.cardReadingComplete`) until the request is sent — the card's cryptogram is discarded and never sent later | From `.sendingRequestOnline` on |
 | Customer-QR charge (merchant) | Building the charge | Once the charge is sent |
-| Get-paid QR create (merchant) | Building the create request | Once it is sent. A QR that is already live has nothing in flight: the cancel answers `.noPaymentInProgressForOrderID` — just leave the screen (and call `cancelQrExpiry()`) |
+| Get-paid QR create (merchant) | Building the create request | Once it is sent. A QR that is already showing has nothing in flight on the phone: no cancel to call — just leave the screen (and call `cancelQrExpiry()`) |
 | Scan to pay (wallet) | Checking the card and its keys; the key top-up beforehand; the Face ID / Touch ID / passcode sheet; building the payment | Once the payment is sent |
 | Add a card (wallet) | Device attestation; preparing the device key | Once the request is sent to the token service |
 | Show QR to pay (wallet) | — no wallet-side cancel | The wallet sends nothing: the **merchant's** charge is the request, under an order ID the merchant assigns. Only the merchant can cancel it, with `payments.cancelPayment(merchantOrderID:)`. Taking the QR off the screen does not stop a merchant who has already scanned it |
 
 **Leaving a screen.** When a waiting screen goes away, cancel what it started by its reference
-(`cancelPayment(merchantOrderID:)` on the tap, charge and get-paid QR screens). A payment that has
+(`cancelPayment(merchantOrderID:)` on the tap and charge screens, and on the get-paid QR screen while the QR is still being created). A payment that has
 already been sent is not cancelled: it runs to its result, which the SDK records in history.
 
 ### A cancelled call ends `NOT_SENT` / `CANCELLED`
@@ -2815,7 +2815,7 @@ User enters account number
     digitise                       (never PENDING)
         │
         ├─ NOT_SENT / FAILED ──► show the reason; digitise again
-        │   (NOT_SENT / CANCELLED: cancelDigitise stopped it — back to the form)
+        │   (NOT_SENT / CANCELLED: cancelDigitise stopped it — close add-card)
         │
         ├────────────────┬──────────────────────────┐
         ▼                ▼                          ▼

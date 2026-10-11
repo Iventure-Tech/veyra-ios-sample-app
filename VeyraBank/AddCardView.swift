@@ -117,8 +117,11 @@ struct AddCardView: View {
                         ProgressView()
                         Text("Digitising…").foregroundStyle(.gray)
                     }
-                    // Cancellable only while the request is still on the device (attestation,
-                    // key setup); once it has been sent the SDK refuses and the digitise finishes.
+                }
+                // Not digitising: Cancel just closes. Digitising: cancellable only while the
+                // request is still on the device (attestation, key setup); once it has been sent
+                // the SDK refuses and the digitise finishes.
+                if !digitiseSucceeded {
                     Button("Cancel", role: .destructive) { cancelDigitise() }
                 }
                 if let cancelNote {
@@ -252,10 +255,9 @@ struct AddCardView: View {
                 bankName: selectedBankName,
                 clientRequestID: requestID
             )
-            // Cancelled before anything was sent: NOT_SENT / CANCELLED. Nothing to show —
-            // the form is still filled in to add the card again.
+            // Cancelled before anything was sent: NOT_SENT / CANCELLED — close the screen.
             if r.responseStatus == VeyraResponseStatus.notSent && r.responseStatusReason == "CANCELLED" {
-                cancelNote = "Cancelled — nothing was sent. You can add the card again."
+                presentationMode.wrappedValue.dismiss()
                 return
             }
             // Every digitise ends with an outcome. FAILED / DECLINED / NOT_SENT carry the reason;
@@ -273,18 +275,23 @@ struct AddCardView: View {
     /// Cancel names this attempt's clientRequestID. The cancel answers at once; the digitise
     /// itself still delivers its own outcome to the `await` above.
     private func cancelDigitise() {
-        guard let clientRequestID else { return }
+        guard digitising, let clientRequestID else {
+            presentationMode.wrappedValue.dismiss()   // nothing running: just close
+            return
+        }
         switch VeyraWallet.shared.tokenisation.cancelDigitise(clientRequestID: clientRequestID) {
         case .cancelled:
-            // The digitise ends NOT_SENT / CANCELLED; the await above handles it.
+            // The digitise ends NOT_SENT / CANCELLED; the await above closes the screen.
             break
         case .tooLateToCancelRequestAlreadySent:
             // Already with the issuer — keep waiting for its result.
             cancelNote = "This can no longer be cancelled"
-        case .tooLateToCancelTaskAlreadyProcessed, .noDigitisationInProgressForClientRequestID,
-             .noPaymentInProgressForOrderID:
-            // Already finished (its result is on screen) or never running: nothing to do.
+        case .tooLateToCancelTaskAlreadyProcessed:
+            // Already finished: keep waiting for the result it delivered.
             break
+        case .noDigitisationInProgressForClientRequestID, .noPaymentInProgressForOrderID:
+            // Nothing running under this ID: close.
+            presentationMode.wrappedValue.dismiss()
         }
     }
 }

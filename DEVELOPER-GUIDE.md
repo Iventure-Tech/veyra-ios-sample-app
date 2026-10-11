@@ -1064,6 +1064,8 @@ latest). `attempts` lists every attempt, newest first (`OrderPaymentAttempt`: `r
 attempts, or no record at all (another phone took it, or the app was reinstalled) — it asks the
 gateway, because an attempt this phone never recorded can outrank its own.
 
+**A payment still on its way counts.** A tap or customer-QR charge is on the history as `PENDING` before its request leaves, and the gateway's answer is combined with this phone's own attempts — so while a payment is in flight the lookup answers `PENDING` (don't take another payment), even when the gateway has no record of it yet.
+
 **A merchant QR that has not been paid yet** has no attempt, so it answers rank 4 —
 `RETRY` / `25` / `UNABLE_TO_LOCATE_RECORD` — until the customer pays it. That is not a failure.
 

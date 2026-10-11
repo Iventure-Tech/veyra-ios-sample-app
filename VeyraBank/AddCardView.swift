@@ -162,9 +162,17 @@ struct AddCardView: View {
         banksState = .loading
         do {
             let trimmed = accountNumber.trimmingCharacters(in: .whitespaces)
-            let banks = try await VeyraWallet.shared.tokenisation.banks(
+            let list = try await VeyraWallet.shared.tokenisation.banks(
                 accountNumber: trimmed.isEmpty ? nil : trimmed
             )
+            // A read answers an outcome: no banks comes with the reason (offline above all).
+            guard list.responseStatus == VeyraResponseStatus.approved else {
+                banksState = .failed(list.responseStatusReason == "NO_NETWORK_CONNECTION"
+                    ? "No internet connection — connect and try again."
+                    : "Could not load banks (\(list.responseStatusReason ?? list.responseStatus)).")
+                return
+            }
+            let banks = list.banks
             // Keep the prefilled institution when it's in the list; otherwise select the first.
             if !banks.contains(where: { $0.institutionCode == selectedInstitutionCode }),
                let first = banks.first {
@@ -190,7 +198,9 @@ struct AddCardView: View {
                 accountHolderName: trimmed(accountName),
                 accountNumberSource: "MANUAL" // the account number was keyed in by the user
             )
-            eligibility = "\(response.responseCode ?? "unknown")\(response.message.map { " — \($0)" } ?? "")"
+            // Branch on the status; show the reason (the issuer's, or why it never reached Veyra).
+            let reason = response.responseStatusReason.map { " (\($0))" } ?? ""
+            eligibility = "\(response.responseStatus ?? "unknown")\(reason)\(response.message.map { " — \($0)" } ?? "")"
         } catch {
             eligibilityError = String(describing: error)
         }
@@ -225,9 +235,12 @@ struct AddCardView: View {
                 recommendationReasons: [.goodActivityHistory],
                 bankName: selectedBankName
             )
+            // Every digitise ends with an outcome. FAILED / DECLINED / NOT_SENT carry the reason;
+            // digitise is never PENDING — an answer that never arrived is FAILED: add the card again.
             let stored = r.tokenStored ? " · token stored" : ""
             let tur = r.tokenUniqueReference.map { " · \($0)" } ?? ""
-            digitiseResult = "\(r.responseCode ?? "unknown")\(tur)\(stored)"
+            let reason = r.responseStatusReason.map { " (\($0))" } ?? ""
+            digitiseResult = "\(r.responseStatus ?? "unknown")\(reason) · \(r.responseCode ?? "-")\(tur)\(stored)"
             digitiseSucceeded = r.tokenStored
         } catch {
             digitiseError = String(describing: error)

@@ -113,7 +113,7 @@ struct VeyraBankApp: App {
 struct HomeView: View {
     // Home is the inert screen: mode is NONE here (the SDK claims a mode only while a
     // payment is actually in flight, and drops back to inert by itself).
-    @State private var mode: VeyraMode = VeyraSDK.shared.currentMode
+    @State private var mode: VeyraMode = ((try? VeyraSDK.shared.currentMode) ?? .none)
     // Get paid is locked until a merchant is registered;
     // registration/edit/activate/deactivate live behind the settings gear.
     @State private var registered = false
@@ -223,7 +223,7 @@ struct HomeView: View {
     }
 
     private func refresh() {
-        mode = VeyraSDK.shared.currentMode
+        mode = ((try? VeyraSDK.shared.currentMode) ?? .none)
         signedIn = DemoSession.isSignedIn
         customerID = DemoSession.customerID
         registered = signedIn && VeyraSoftPOS.shared.merchant.isRegistered
@@ -235,7 +235,9 @@ struct HomeView: View {
             let status = activate
                 ? try await VeyraSoftPOS.shared.merchant.activate(merchantID: merchantID)
                 : try await VeyraSoftPOS.shared.merchant.deactivate(merchantID: merchantID)
-            merchantActionMessage = "Merchant \(activate ? "activated" : "deactivated") (\(status.status ?? "?"))"
+            merchantActionMessage = status.responseStatus == VeyraResponseStatus.approved
+                ? "Merchant \(activate ? "activated" : "deactivated") (\(status.status ?? "?"))"
+                : "Could not \(activate ? "activate" : "deactivate") (\(status.responseStatus) · \(status.responseStatusReason ?? "?"))"
         } catch {
             merchantActionMessage = "Failed to \(activate ? "activate" : "deactivate") merchant"
         }

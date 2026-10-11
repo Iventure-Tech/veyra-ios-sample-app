@@ -84,6 +84,11 @@ struct GetPaidView: View {
     @State private var tapState: TapState = .waiting
     @State private var tapHint: String?
     @State private var tapSession: TapPaymentSession?
+    // The retry rule for your order ID: an outcome that never reached Veyra (NOT_SENT) leaves the
+    // order ID unused, so the retry reuses it; every other outcome used it up, so the next attempt
+    // takes a fresh one.
+    @State private var retryOrderID: String?
+    @State private var currentOrderID = ""
     @FocusState private var amountFocused: Bool
 
     /// A blank/absent status is treated as active
@@ -406,9 +411,24 @@ struct GetPaidView: View {
                     },
                     // Your own order id — required, and unique across all of the merchant's
                     // payments (a retry needs a new one). The transaction reference is the SDK's to mint.
-                    merchantOrderID: SampleData.nextOrderID()
+                    merchantOrderID: takeOrderID()
                 )
-                guard let image = Self.makeQR(payload: context.mpmPayload) else {
+                settleOrderID(responseStatus: context.responseStatus)
+                // Creating the QR ends with an outcome: render it only when it was made.
+                guard context.responseStatus == VeyraResponseStatus.approved,
+                      let txRef = context.txRef, let payload = context.mpmPayload else {
+                    switch context.responseStatusReason {
+                    case "DUPLICATE_MERCHANT_ORDER_ID":
+                        qrState = .failed("This order id is already used by another payment — start a new sale")
+                    case "NO_NETWORK_CONNECTION":
+                        qrState = .failed("No internet connection — connect and try again")
+                    default:
+                        qrState = .failed("Could not create the payment code (\(context.responseStatusReason ?? context.responseStatus)) — please try again")
+                    }
+                    scheduleAutoReturn()
+                    return
+                }
+                guard let image = Self.makeQR(payload: payload) else {
                     qrState = .failed("Could not render the payment code — please try again")
                     scheduleAutoReturn()
                     return
@@ -416,12 +436,13 @@ struct GetPaidView: View {
                 qrState = .live(image)
                 while !Task.isCancelled {
                     try await Task.sleep(nanoseconds: 2_500_000_000)
-                    guard let status = try? await VeyraSoftPOS.shared.payments.contextStatus(txRef: context.txRef) else {
+                    // A poll that could not be made carries a reason and no state: just ask again.
+                    guard let status = try? await VeyraSoftPOS.shared.payments.contextStatus(txRef: txRef).value else {
                         continue
                     }
                     if status.isSettled {
                         // The MPM context's txRef is the recorded transaction's reference.
-                        lastPaymentReference = context.txRef
+                        lastPaymentReference = txRef
                         // Settled — stop the expiry watch so it can't overwrite the outcome later.
                         VeyraSoftPOS.shared.payments.cancelQrExpiry()
                         qrState = .settled(approved: status.isApproved, responseCode: status.responseCode)
@@ -434,7 +455,7 @@ struct GetPaidView: View {
                         // say the bank supports confirmation.
                         scheduleAutoReturn()
                         if status.isApproved {
-                            watchCreditConfirmation(reference: context.txRef, initialWaiting: false)
+                            watchCreditConfirmation(reference: txRef, initialWaiting: false)
                         }
                         break
                     }
@@ -447,11 +468,8 @@ struct GetPaidView: View {
             } catch is CancellationError {
                 // Page left / new QR requested.
             } catch {
-                // Another payment already uses this order id
-                // (VeyraSoftPOSError.duplicateMerchantOrderID); nothing was created.
-                qrState = .failed(error.localizedDescription.contains("DUPLICATE_MERCHANT_ORDER_ID")
-                    ? "This order id is already used by another payment — start a new sale"
-                    : "Could not create the payment code — please try again")
+                // Only a setup mistake throws.
+                qrState = .failed("Could not create the payment code: \(error.localizedDescription)")
                 scheduleAutoReturn()
             }
         }
@@ -482,7 +500,7 @@ struct GetPaidView: View {
             case .result(let result):
                 // Map the kernel outcome to a merchant-facing result — never surface
                 // the raw server/kernel error string.
-                let outcome = TapOutcome(status: result.status)
+                let outcome = TapOutcome(status: result.status, reason: result.responseStatusReason)
                 Image(systemName: outcome.icon)
                     .font(.system(size: 64))
                     .foregroundStyle(outcome.color)
@@ -544,6 +562,19 @@ struct GetPaidView: View {
         }
     }
 
+    /// The order ID for this attempt: the unused one from a NOT_SENT outcome, or a fresh one.
+    private func takeOrderID() -> String {
+        let id = retryOrderID ?? SampleData.nextOrderID()
+        retryOrderID = nil
+        currentOrderID = id
+        return id
+    }
+
+    /// After an outcome: keep the order ID for the retry only when the payment never reached Veyra.
+    private func settleOrderID(responseStatus: String?) {
+        retryOrderID = responseStatus == VeyraResponseStatus.notSent ? currentOrderID : nil
+    }
+
     /// Arm the CoreNFC reader for one tap; kernel dialogue events drive the screen —
     /// unsupported targets keep the reader armed with a hint, mirroring a physical terminal.
     private func startTapPayment() {
@@ -554,9 +585,9 @@ struct GetPaidView: View {
         creditConfirmState = nil
         let session = VeyraSoftPOS.shared.tap.session(
             amountMinorUnits: amountMinorUnits ?? 0,
-            // Your own order id — required, and unique across all of the merchant's payments (a
-            // retry needs a new one). The transaction reference is the SDK's to mint.
-            merchantOrderID: SampleData.nextOrderID()
+            // Your own order id — required and unique across the merchant's payments; reused only
+            // to retry a NOT_SENT outcome. The transaction reference is the SDK's to mint.
+            merchantOrderID: takeOrderID()
         ) { event in
             switch event {
             case .cardDetected:
@@ -583,6 +614,7 @@ struct GetPaidView: View {
                 }
             case .result(let result):
                 lastPaymentReference = result.reference
+                settleOrderID(responseStatus: result.responseStatus)
                 tapState = .result(result)
                 tapHint = nil
                 // An approved tap carries the credit facts, so it enters the same "confirming
@@ -599,9 +631,11 @@ struct GetPaidView: View {
         }
         tapSession = session
         do {
+            // Refusals (blank order ID, the wallet's payment in flight) arrive as a NOT_SENT
+            // .result; only a setup mistake throws.
             try session.start()
         } catch {
-            tapState = .failed("Could not arm the reader — finish the in-flight payment first")
+            tapState = .failed("Could not arm the reader: \(error.localizedDescription)")
             scheduleAutoReturn()
         }
     }
@@ -635,11 +669,11 @@ struct GetPaidView: View {
     private func handleCustomerQrScan(_ payload: String) {
         guard case .scanCustomerQr = page else { return } // one transition per scan session
         Task { @MainActor in
-            do {
-                let scanned = try await VeyraSoftPOS.shared.payments.inspectCustomerQr(payload)
+            // NOT_SENT / INVALID_REQUEST means "not a payment QR": transient hint, stay armed.
+            if let inspection = try? await VeyraSoftPOS.shared.payments.inspectCustomerQr(payload),
+               let scanned = inspection.qr {
                 page = .confirmCustomerQr(scanned)
-            } catch {
-                // Not a payment QR — transient hint, stay armed (no terminal failure).
+            } else {
                 customerQrScanHint = "Not a payment code — try again"
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 customerQrScanHint = nil
@@ -680,15 +714,17 @@ struct GetPaidView: View {
             do {
                 let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(
                     scanned,
-                    // Optional, yours, never a key — see createContext above.
-                    merchantOrderID: SampleData.nextOrderID()
+                    // Yours, never a key — reused only to retry a NOT_SENT outcome.
+                    merchantOrderID: takeOrderID()
                 )
+                settleOrderID(responseStatus: outcome.responseStatus)
                 // A delivered outcome (approved or declined) is recorded under the reference the
                 // SDK minted and the gateway echoed — never one the app made up.
-                lastPaymentReference = outcome.reference
+                lastPaymentReference = outcome.reference.isEmpty ? nil : outcome.reference
+                let reason = outcome.responseStatusReason.map { " · \($0)" } ?? ""
                 page = .customerQrResult(
                     approved: outcome.approved,
-                    detail: "Customer QR payment · \(outcome.responseCode ?? "-")"
+                    detail: "Customer QR payment · \(outcome.responseStatus ?? "-")\(reason) · \(outcome.responseCode ?? "-")"
                 )
                 // The approval said the merchant's bank supports credit confirmation —
                 // the SDK's app-scoped sweep is already polling; wait on the result page and
@@ -703,7 +739,7 @@ struct GetPaidView: View {
                     )
                 }
             } catch {
-                // Transport failure — nothing recorded, so no receipt CTA.
+                // Only a setup mistake throws.
                 page = .customerQrResult(approved: false, detail: error.localizedDescription)
                 scheduleAutoReturn()
             }
@@ -862,8 +898,15 @@ private struct TapOutcome {
     let title: String
     let message: String
 
-    init(status: String) {
+    init(status: String, reason: String? = nil) {
         switch status.uppercased() {
+        case "NOT_SENT":
+            // Never reached Veyra — nothing was charged; retry with the same order.
+            icon = "arrow.clockwise.circle.fill"; color = .orange
+            title = "Payment not sent"
+            message = reason == "NO_NETWORK_CONNECTION"
+                ? "No internet connection — connect and try again. Nothing was charged."
+                : "Nothing was charged (\(reason ?? "not sent")). Try again."
         case "APPROVED":
             icon = "checkmark.circle.fill"; color = .green
             title = "Payment successful"; message = "The customer's payment was approved."
@@ -871,8 +914,9 @@ private struct TapOutcome {
             icon = "xmark.circle.fill"; color = .red
             title = "Payment declined"; message = "The customer's bank declined this payment."
         case "PENDING":
+            // May have been charged — never take the payment again; the SDK resolves it.
             icon = "clock.fill"; color = .orange
-            title = "Payment pending"; message = "We couldn't confirm the payment yet — we'll update the status shortly."
+            title = "Payment pending"; message = "We couldn't confirm the payment yet — we'll update the status shortly. Don't charge again."
         default: // FAILED / unknown
             icon = "xmark.circle.fill"; color = .red
             title = "Transaction failed"; message = "Something went wrong. Please ask the customer to tap again."

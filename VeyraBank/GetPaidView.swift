@@ -419,7 +419,7 @@ struct GetPaidView: View {
                       let txRef = context.txRef, let payload = context.mpmPayload else {
                     switch context.responseStatusReason {
                     case "DUPLICATE_MERCHANT_ORDER_ID":
-                        qrState = .failed("This order id is already used by another payment — start a new sale")
+                        qrState = .failed(duplicateOrderMessage(originalStatus: context.originalPayment?.responseStatus))
                     case "NO_NETWORK_CONNECTION":
                         qrState = .failed("No internet connection — connect and try again")
                     default:
@@ -500,7 +500,8 @@ struct GetPaidView: View {
             case .result(let result):
                 // Map the kernel outcome to a merchant-facing result — never surface
                 // the raw server/kernel error string.
-                let outcome = TapOutcome(status: result.status, reason: result.responseStatusReason)
+                let outcome = TapOutcome(status: result.status, reason: result.responseStatusReason,
+                                         originalStatus: result.originalPayment?.responseStatus)
                 Image(systemName: outcome.icon)
                     .font(.system(size: 64))
                     .foregroundStyle(outcome.color)
@@ -724,7 +725,9 @@ struct GetPaidView: View {
                 let reason = outcome.responseStatusReason.map { " · \($0)" } ?? ""
                 page = .customerQrResult(
                     approved: outcome.approved,
-                    detail: "Customer QR payment · \(outcome.responseStatus ?? "-")\(reason) · \(outcome.responseCode ?? "-")"
+                    detail: outcome.responseStatusReason == "DUPLICATE_MERCHANT_ORDER_ID"
+                        ? duplicateOrderMessage(originalStatus: outcome.originalPayment?.responseStatus)
+                        : "Customer QR payment · \(outcome.responseStatus ?? "-")\(reason) · \(outcome.responseCode ?? "-")"
                 )
                 // The approval said the merchant's bank supports credit confirmation —
                 // the SDK's app-scoped sweep is already polling; wait on the result page and
@@ -890,6 +893,14 @@ struct GetPaidView: View {
     }
 }
 
+/// What to tell the merchant when the order ID is already on another payment, from that payment's
+/// status. Never "try again": the order is paid, or a payment for it is still being confirmed.
+func duplicateOrderMessage(originalStatus: String?) -> String {
+    originalStatus == VeyraResponseStatus.pending
+        ? "A payment for this order is still being confirmed - do not take another payment"
+        : "This order is already paid - do not take another payment"
+}
+
 /// Merchant-facing mapping of a tap's `TransactionStatus` — icon, colour, and copy for
 /// each outcome. Keeps the raw kernel/server error string out of the UI.
 private struct TapOutcome {
@@ -898,8 +909,12 @@ private struct TapOutcome {
     let title: String
     let message: String
 
-    init(status: String, reason: String? = nil) {
+    init(status: String, reason: String? = nil, originalStatus: String? = nil) {
         switch status.uppercased() {
+        case "FAILED" where reason == "DUPLICATE_MERCHANT_ORDER_ID":
+            // The order ID is already on another payment: never take a second payment for the order.
+            icon = "exclamationmark.circle.fill"; color = .orange
+            title = "Order already used"; message = duplicateOrderMessage(originalStatus: originalStatus)
         case "NOT_SENT":
             // Never reached Veyra — nothing was charged; retry with the same order.
             icon = "arrow.clockwise.circle.fill"; color = .orange

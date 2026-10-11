@@ -801,7 +801,7 @@ showResult(status: outcome.responseStatus, reason: outcome.responseStatusReason,
 
 `CustomerQrChargeOutcome`: `responseStatus` (`APPROVED` · `DECLINED` · `FAILED` · `PENDING` · `NOT_SENT` — branch on this), `responseStatusReason` (`INSUFFICIENT_FUNDS`, `NO_RESPONSE_RECEIVED`, `NO_NETWORK_CONNECTION`…; show and log it), `responseCode` (the wire code — for receipts and support, never to branch on; `nil` on `NOT_SENT`), `approved: Bool` (true only when `responseStatus == "APPROVED"` — never worked out from the code), `transactionID`, `reference`, plus `creditTransactionID` + `isCreditConfirmationSupported` (populated on approved charges — the cue to wait for credit confirmation, see `transactions.creditConfirmation`). A `PENDING` charge may have gone through: never charge again — the SDK resolves it in the background.
 
-> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: **required** on every merchant payment, echoed back, and **unique per merchant** across all its payments, whatever their outcome: a payment that reuses one — even one used by a declined or failed payment — is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, and `createContext` ends `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` with no QR created; the refusal includes the original payment's outcome. A retry needs a new order id; several QRs may share one until one of them is paid. `createContext`, `chargeCustomerQr` and `tap.session` all require it: omitting it does not compile, and a blank (or over-255-character) value ends the call `NOT_SENT` / `INVALID_REQUEST` before anything is sent. After a `NOT_SENT` outcome the order id was never used — retry with the **same** one.
+> **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: **required** on every merchant payment, echoed back, and **unique per merchant** across all its payments, whatever their outcome: a payment that reuses one — even one used by a declined or failed payment — is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, and `createContext` ends `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` with no QR created; the refusal carries that payment as `originalPayment` (on `TapPaymentResult`, `CustomerQrChargeOutcome` and `PaymentContextQR`) — its `responseStatus` says whether the order is already paid (`APPROVED`) or still being confirmed (`PENDING`), so tell the merchant which and do not take another payment for it. A retry needs a new order id; several QRs may share one until one of them is paid. `createContext`, `chargeCustomerQr` and `tap.session` all require it: omitting it does not compile, and a blank (or over-255-character) value ends the call `NOT_SENT` / `INVALID_REQUEST` before anything is sent. After a `NOT_SENT` outcome the order id was never used — retry with the **same** one.
 
 ---
 
@@ -1906,7 +1906,7 @@ every status lookup. One code always means one reason.
 | `25` | `FAILED` | `UNABLE_TO_LOCATE_RECORD` | A status lookup found no such payment | It never arrived; safe to pay again |
 | `30` | `FAILED` | `INVALID_REQUEST` | The gateway refused the request before sending it on | Fix the request; new order ID |
 | `91` | `FAILED` | `ISSUER_SWITCH_NOT_AVAILABLE` | Veyra could not reach the bank | Try again later with a new order ID |
-| `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | This merchant order ID is already used; the response includes the original payment | Read the original's outcome; use a new order ID for a new payment |
+| `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | This merchant order ID is already used; `originalPayment` carries the payment holding it | Do not take another payment for the order. `originalPayment.responseStatus` `PENDING`: "A payment for this order is still being confirmed"; otherwise "This order is already paid" |
 
 **Payment status lookups** (`transactions.refreshStatus(reference:)`,
 `tokenisation.refreshTransactionStatus(transactionHash:)`, `reconcilePendingTransactions()`) return
@@ -2445,10 +2445,18 @@ public struct TapPaymentResult {
     let sdkErrorCode: String?             // deprecated — read responseStatusReason
     let reference: String?
     let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?
+    let originalPayment: OriginalPayment?   // on DUPLICATE_MERCHANT_ORDER_ID only
+}
+public struct OriginalPayment {             // the payment already holding a reused order id
+    let responseCode: String?
+    let responseStatus: String?             // "APPROVED" (already paid) / "PENDING" (still being confirmed)
+    let responseStatusReason: String?; let amountMinorUnits: Int64?
+    let reference: String?; let transactionID: String?
 }
 public struct PaymentContextQR {            // createContext — txRef/expiry/kid/mpmPayload set only on APPROVED
     let txRef: String?; let expiry: String?; let kid: String?; let mpmPayload: String?
     let responseStatus: String; let responseStatusReason: String?; let message: String?
+    let originalPayment: OriginalPayment?   // on DUPLICATE_MERCHANT_ORDER_ID only
 }
 public struct PaymentContextState { let txRef: String; let state: String; let responseCode: String?; var isSettled: Bool; var isApproved: Bool }   // contextStatus → VeyraLookup<PaymentContextState>
 public struct CustomerQrInspection { let qr: ScannedCustomerQr?; let responseStatus: String; let responseStatusReason: String?; let message: String? }   // APPROVED, or NOT_SENT / INVALID_REQUEST
@@ -2459,6 +2467,7 @@ public struct CustomerQrChargeOutcome {
     let responseCode: String?               // receipts and support only; nil on NOT_SENT
     let transactionID: String?; let reference: String
     let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?
+    let originalPayment: OriginalPayment?   // on DUPLICATE_MERCHANT_ORDER_ID only
 }
 public struct MerchantTransaction { let reference: String; let rail: String; let railLabel: String; let amountMinorUnits: Int64; let currencyNumeric: String?; let status: String; let responseCode: String?; let responseStatusReason: String?; let transactionTime: String?; let transactionID: String?; let merchantOrderID: String?; let maskedTokenLast4: String; let transactionHash: String?; let cardholderName: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool?; let creditConfirmationStatus: String? }
 public struct CreditConfirmation { let creditTransactionID: String; let status: String; let amountMinorUnits: Int64?; let creditedAt: String?; let bankReference: String?; let message: String? }   // creditConfirmation → VeyraLookup<CreditConfirmation>

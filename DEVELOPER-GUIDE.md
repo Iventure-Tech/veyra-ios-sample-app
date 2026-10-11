@@ -2185,7 +2185,7 @@ Reference for the public models. All are immutable value types; fields not liste
 public struct StoredCard {                  // wallet card display record
     let tokenUniqueReference: String        // identity for activation/removal/status
     let panLastFour: String
-    let maskedPAN: String                   // "•••• •••• •••• 1112"
+    let maskedPAN: String                   // "**** **** **** 1112"
     let expiry: String                      // "MM/YY"
     let cardHolderName: String      // "AFRIGO ****1234" — scheme + masked last four, not a person
     let accountHolderName: String

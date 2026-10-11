@@ -124,7 +124,7 @@ struct AddCardView: View {
                 if !digitiseSucceeded {
                     Button("Cancel", role: .destructive) { cancelDigitise() }
                 }
-                if let cancelNote {
+                if let cancelNote, digitising {
                     Text(cancelNote).font(.footnote).foregroundStyle(.orange)
                 }
                 if let digitiseResult {

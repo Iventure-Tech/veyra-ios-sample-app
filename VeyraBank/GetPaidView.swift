@@ -358,7 +358,7 @@ struct GetPaidView: View {
                 }
             }
             Spacer()
-            if let cancelNote {
+            if let cancelNote, case .creating = qrState {
                 Text(cancelNote).font(.footnote).foregroundStyle(.orange)
             }
             Button(qrFinished ? "Done" : "Cancel", role: qrFinished ? ButtonRole?.none : .destructive) {
@@ -760,6 +760,11 @@ struct GetPaidView: View {
                 cancelPayment { page = .amountEntry }
             }
             .buttonStyle(.bordered)
+        }
+        .onDisappear {
+            // Leaving the screen: cancel a charge still on the phone by its order ID. One already
+            // sent is not cancelled — it runs to its result, which the SDK records.
+            _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID)
         }
     }
 

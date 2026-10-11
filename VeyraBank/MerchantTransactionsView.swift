@@ -22,6 +22,10 @@ struct MerchantTransactionsView: View {
     // In-flight reference for the manual "check status" ask, and its per-row note.
     @State private var checkingStatus: String?
     @State private var statusCheckNotes: [String: String] = [:]
+    // Look up an order by your own order id (one call for every rail).
+    @State private var lookupOrderID = ""
+    @State private var lookingUp = false
+    @State private var lookupResult: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +39,23 @@ struct MerchantTransactionsView: View {
                 Color.clear.frame(width: 44, height: 1) // balance the back button
             }
             .padding()
+
+            // "What happened to this order?" — e.g. after the app restarted before a result arrived,
+            // or for a PENDING sale. iOS 15 has no text field in alerts, so it lives inline.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    TextField("Your order id", text: $lookupOrderID)
+                        .textFieldStyle(.roundedBorder)
+                        .autocapitalization(.none)
+                    Button(lookingUp ? "Looking up…" : "Look up") { Task { await lookUpOrder() } }
+                        .disabled(lookingUp || lookupOrderID.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if let lookupResult {
+                    Text(lookupResult).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
 
             if loading {
                 Spacer(); ProgressView().tint(.white); Spacer()
@@ -66,6 +87,35 @@ struct MerchantTransactionsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Couldn't build the receipt for this transaction — please try again.")
+        }
+    }
+
+    /// A read: never thrown (except a setup mistake). `failureReason` says why the gateway could not
+    /// be asked; `value` is then what this phone holds for the order, if anything.
+    private func lookUpOrder() async {
+        let orderID = lookupOrderID.trimmingCharacters(in: .whitespaces)
+        lookingUp = true
+        defer { lookingUp = false }
+        do {
+            let lookup = try await VeyraSoftPOS.shared.transactions.paymentStatus(merchantOrderID: orderID)
+            var text: String
+            if let order = lookup.value {
+                switch order.responseStatus {
+                case VeyraResponseStatus.approved:
+                    text = "Paid — do not take another payment for this order."
+                case VeyraResponseStatus.pending:
+                    text = "A payment may still be going through — do not take another payment yet."
+                default:
+                    text = "Not paid (\(order.responseStatus)\(order.responseStatusReason.map { " · \($0)" } ?? "")) — you can take a payment with the same order id."
+                }
+                text += " \(order.attempts.count) attempt(s), answered by \(order.answeredBy.lowercased())."
+            } else {
+                text = "No record of this order on this device."
+            }
+            if let reason = lookup.failureReason { text += " Could not ask the gateway: \(reason)." }
+            lookupResult = text
+        } catch {
+            lookupResult = error.localizedDescription
         }
     }
 

@@ -106,7 +106,7 @@ VeyraSDK.signOut()
 
 | Member | Parameters | Description |
 |--------|------------|-------------|
-| `configure(customerID:provider:softpos:wallet:)` | The signed-in customer's id, your one provider (shared by both SDKs — see [Connecting to Veyra](#connecting-to-veyra)) and both member configurations | **Throws** (`.invalidConfiguration(message:)` when the provider is unusable). Configures both SDKs for that customer, plus the exclusive-mode arbiter. **Call at every launch** — the SDK never remembers who is signed in. The process starts **inert**; safe to call again (reconfigures, stays inert). A different customer stops the previous customer's work in both SDKs. `customerID` must not be blank and never leaves the device. |
+| `configure(customerID:provider:softpos:wallet:)` | The signed-in customer's id, your one provider (shared by both SDKs — see [Connecting to Veyra](#connecting-to-veyra)) and both member configurations | **Throws** (`.invalidConfiguration(message:)` when the provider is unusable). Configures both SDKs for that customer, plus the exclusive-mode arbiter. **Call at every launch** — the SDK never remembers who is signed in. The process starts **inert**; safe to call again (reconfigures, stays inert). A different customer stops the previous customer's work in both SDKs. `customerID` must not be blank (a blank one throws `.invalidConfiguration`) and never leaves the device. |
 | `signOut()` | — | Static. The customer has logged out: both member SDKs stop everything they run for them and drop every observer registration. Their cards, merchant and history stay on the device for when they sign in again. |
 | `shared` | — | The singleton. |
 | `currentMode` | — | The current exclusive mode (`VeyraMode.none` / `.softpos` / `.wallet`). Read-only observation for UI state — the mode itself is entirely SDK-managed. |
@@ -125,7 +125,7 @@ let merchant = VeyraSoftPOS.shared.merchant
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraSoftPOSError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). The merchant and its transactions are kept per customer: the same customer again changes nothing; a different customer stops the previous customer's watches and opens the new customer's merchant. `customerID` must not be blank and never leaves the device. |
+| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraSoftPOSError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). The merchant and its transactions are kept per customer: the same customer again changes nothing; a different customer stops the previous customer's watches and opens the new customer's merchant. `customerID` must not be blank (a blank one throws `.invalidConfiguration`) and never leaves the device. |
 | `signOut()` | Static. The customer has logged out: stops every merchant watch and drops every observer registration. Their merchant and transactions stay on the device. Until the next `configure` every call throws `VeyraSoftPOSError.notSignedIn`. |
 | `shared` | The singleton. |
 | `merchant` | Merchant lifecycle — registration, status, activate/deactivate, profile update, banks, stored merchant, and `onMerchantStatusChanged` (the SDK watches the merchant's backend status for you). |
@@ -145,7 +145,7 @@ let tokenisation = VeyraWallet.shared.tokenisation
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraWalletError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). Cards, keys, history and receipts are kept per customer: the same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. `customerID` must not be blank and never leaves the device. |
+| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraWalletError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). Cards, keys, history and receipts are kept per customer: the same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. `customerID` must not be blank (a blank one throws `.invalidConfiguration`) and never leaves the device. |
 | `signOut()` | Static. The customer has logged out: stops everything the wallet runs for them (key top-ups, status syncs, history sweeps) and drops every observer registration. Their cards, keys, history and receipts stay on the device. Until the next `configure` every call throws `VeyraWalletError.notSignedIn`. |
 | `shared` | The singleton. |
 | `tokenisation` | The wallet service — bank lookup, eligibility, digitise, activation, cards, payments, history, receipts. |
@@ -1452,11 +1452,16 @@ was sent. Retrying will never help until the code changes.
 **How to use them:** let them surface in development (crash, log, `assertionFailure`). Fix the
 integration. Do not build user-facing screens for them, and do not offer the user a retry.
 
+The same five cases exist on `VeyraWalletError` and `VeyraSoftPOSError`, and on `VeyraSDKError` for
+the combined facade. They are the same five setup errors as on Android and React Native.
+
 | Error | When it happens | Fix |
 |---|---|---|
-| `VeyraWalletError.notConfigured`<br>`VeyraSoftPOSError.notConfigured`<br>`VeyraSDKError.notConfigured` | A call is made before `VeyraWallet.configure(_:customerID:provider:)` / `VeyraSoftPOS.configure(_:customerID:provider:)` / `VeyraSDK.configure(customerID:provider:softpos:wallet:)` | Configure the SDK first, at app start. |
-| `VeyraWalletError.notSignedIn`<br>`VeyraSoftPOSError.notSignedIn` | A call is made after `signOut()`, with no customer | Call `configure` with the customer before using the SDK. Don't call wallet or merchant APIs from screens reachable while signed out. |
-| `VeyraWalletError.invalidConfiguration(message:)`<br>`VeyraSoftPOSError.invalidConfiguration(message:)` | `configure` was given a provider it can't use (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`), or a provider of a different kind from an earlier `configure` in this process. `VeyraSDK.configure` throws the member SDK's case. | Pass a valid provider. `message` names the problem. |
+| `.notConfigured` | Any call before `VeyraWallet.configure(_:customerID:provider:)` / `VeyraSoftPOS.configure(_:customerID:provider:)`. In a combined app, `VeyraSDKError.notConfigured` when `VeyraSDK` is used before `VeyraSDK.configure(customerID:provider:softpos:wallet:)`, including reaching a member SDK through the facade before it is configured | Configure the SDK first, at app start. |
+| `.notSignedIn` | Any call with no customer — after `signOut()`, before the next `configure` | Call `configure` with the customer before using the SDK. Don't call wallet or merchant APIs from screens reachable while signed out. |
+| `.invalidConfiguration(message:)` | Thrown by `configure`: a provider it can't use (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`); a provider of a different kind from an earlier `configure` in this process; a blank `customerID`; missing required configuration (environment, payment app provider ID, token requestor ID, recommendation standard version). `VeyraSDK.configure` throws the member SDK's case | Fix the configuration. `message` names the exact problem. |
+| `.sessionRequired` | A payment call made without its screen session | Declared for parity with React Native, which raises it. On iOS the SDK follows the screen lifecycle itself, so you should never see it. |
+| `.unsupportedOnPlatform` | A method this platform can't perform — for example wallet tap-to-pay, which iOS does not allow | Don't call it on iOS. The wallet pays by QR. |
 
 Every case conforms to `LocalizedError`, so `error.localizedDescription` carries the message for your
 logs.
@@ -1567,6 +1572,7 @@ produce on iOS:
 | `NOT_SENT` | — | `TOKEN_NOT_ACTIVE` | Wallet: the card is not active (e.g. suspended by the issuer) | Show the card's state. Payments resume by themselves once a status sync sees it active |
 | `NOT_SENT` | — | `AMOUNT_EXCEEDS_CARD_LIMIT` | Wallet: the amount is larger than this card can pay in one go | Offer a smaller amount or another card. Going online does not help |
 | `NOT_SENT` | — | `DEVICE_NOT_BOUND` | Wallet: the card was added on another device, or on this phone before the app was reinstalled | Remove the card and add it again on this phone — the only remedy. Pre-empt it: the card reads `deviceNotBound == true` |
+| `NOT_SENT` | — | `MISSING_MANDATORY_CONFIG` | SoftPOS: a payment was started before the merchant was registered on this device | Register the merchant (`merchant.register(_:)`) first |
 | `NOT_SENT` | — | `MODE_REFUSED` | Combined apps: the other mode's payment is in progress | Wait for it to finish. Never happens in a single-product app |
 | `NOT_SENT` | — | `CARD_READ_FAILED` | Card tap: the card could not be read, so the payment ended before anything was sent | Ask the customer to tap again |
 | `NOT_SENT` | — | `NO_ACTIVE_CARD` | Wallet: no card is set as active (scan-to-pay, show-QR-to-pay) | Ask the user to choose a card |

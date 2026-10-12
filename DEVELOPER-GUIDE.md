@@ -1066,8 +1066,11 @@ gateway, because an attempt this phone never recorded can outrank its own.
 
 **A payment still on its way counts.** A tap or customer-QR charge is on the history as `PENDING` before its request leaves, and the gateway's answer is combined with this phone's own attempts — so while a payment is in flight the lookup answers `PENDING` (don't take another payment), even when the gateway has no record of it yet.
 
-**A merchant QR that has not been paid yet** has no attempt, so it answers rank 4 —
-`RETRY` / `25` / `UNABLE_TO_LOCATE_RECORD` — until the customer pays it. That is not a failure.
+**A merchant QR that has not been paid yet** answers `PENDING` on the phone that created it — the QR is
+on its history from creation, as an open attempt — until the customer pays it. That is not a failure,
+and it means the same thing: don't take another payment for the order while the QR can still be paid.
+Asked from a phone with no record of the QR (another phone, or after a reinstall), the gateway has no
+attempt to report, so it answers rank 4 — `RETRY` / `25` / `UNABLE_TO_LOCATE_RECORD`.
 
 **It is a read** ([`VeyraLookup`](#veyralookup--the-answer-to-a-read)). It changes nothing, so asking
 again is always safe, and it never answers with an outcome of its own. When the gateway could not be
@@ -1516,7 +1519,27 @@ renderQr(payload)
 // .onDisappear: VeyraWallet.shared.tokenisation.cancelQrExpiry()
 ```
 
-The result (`PaymentQr`): `responseStatus` — `APPROVED` or `NOT_SENT` (showing a QR sends nothing, so there is no other status), `responseStatusReason` on `NOT_SENT` (`AUTH_CANCELLED`, `AUTH_FAILED`, `AUTH_UNAVAILABLE`, `ONLINE_REQUIRED`, `AMOUNT_EXCEEDS_CARD_LIMIT`, `TOKEN_NOT_ACTIVE`, `DEVICE_NOT_BOUND`, `NO_ACTIVE_CARD`, `CARD_CANNOT_SHOW_QR`, `INVALID_REQUEST`), `message`, `payload` (**render as the QR**; `nil` unless `APPROVED`), `tokenUniqueReference`, `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. The payment's own outcome arrives later, on the history row. To show "paid ✓" on the customer's screen, poll while the QR is up: call `reconcilePendingTransactions`, then look in `transactionHistory` for the row whose `transactionHash` matches this QR's.
+The result (`PaymentQr`): `responseStatus` — `APPROVED` or `NOT_SENT` (showing a QR sends nothing, so there is no other status), `responseStatusReason` on `NOT_SENT` (`AUTH_CANCELLED`, `AUTH_FAILED`, `AUTH_UNAVAILABLE`, `ONLINE_REQUIRED`, `AMOUNT_EXCEEDS_CARD_LIMIT`, `TOKEN_NOT_ACTIVE`, `DEVICE_NOT_BOUND`, `NO_ACTIVE_CARD`, `CARD_CANNOT_SHOW_QR`, `INVALID_REQUEST`), `message`, `payload` (**render as the QR**; `nil` unless `APPROVED`), `tokenUniqueReference`, `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. The payment's own outcome arrives later, on the history row. To show "paid ✓" on the customer's screen, check **this QR's own payment** while the QR is up: call [`refreshTransactionStatus`](#refreshtransactionstatus) with its `transactionHash` — one request per check — and stop on a final status:
+
+```swift
+guard let hash = qr.transactionHash else { return }
+while !Task.isCancelled {
+    try? await Task.sleep(nanoseconds: 3_000_000_000)
+    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
+    let row = try? await VeyraWallet.shared.tokenisation
+        .refreshTransactionStatus(transactionHash: hash).value
+    switch row?.authorizationStatus {
+    case "APPROVED": onSettled(approved: true); return
+    case "DECLINED", "FAILED": onSettled(approved: false); return
+    default: continue   // PENDING (the QR's own row exists from the moment it is shown), RETRY, or not found yet: keep the QR up
+    }
+}
+```
+
+The QR's history row is created `PENDING` as soon as the QR is shown, so finding the row is not
+the answer — only a final status is. **Don't loop `reconcilePendingTransactions` here:** it asks
+about every open payment on the device back-to-back, so on a short loop it gets the wallet
+throttled (`429`) by the gateway.
 
 ---
 
@@ -1627,7 +1650,7 @@ else if let updated = lookup.value { live = updated }     // nil if unknown here
 
 #### `reconcilePendingTransactions`
 
-Reconcile still-`PENDING` rows against the backend **right now**. The SDK's own app-scoped sweep (above) already resolves them without you, so this is the explicit "check again" rather than the mechanism: call it on pull-to-refresh, on returning to the foreground, or on a short loop while a shown QR is on screen for a snappier update than the backoff would give.
+Reconcile still-`PENDING` rows against the backend **right now**. The SDK's own app-scoped sweep (above) already resolves them without you, so this is the explicit "check again" rather than the mechanism: call it on an occasion — pull-to-refresh, returning to the foreground, opening history — **never on a loop**. It asks about **every** open row on the device, so a screen waiting for one payment (a [shown QR](#show-qr-to-pay-customer-presented), say) calls [`refreshTransactionStatus`](#refreshtransactionstatus) with that payment's hash instead: one request rather than one per open row. If the gateway throttles (`429`), the pass stops there and the remaining rows wait for the SDK's next sweep.
 
 Unlike the scheduled sweep it ignores both the backoff and the 30-day window — an explicit ask always reaches the backend, and it is the supported way to check a row the sweep has stopped polling. A row whose own check fails is left exactly as it was.
 

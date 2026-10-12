@@ -185,26 +185,26 @@ struct ShowToPayView: View {
         }
     }
 
-    /// While the QR is displayed, drive the gateway reconcile
-    /// every few seconds — the CPM outcome only exists server-side once the merchant charges,
-    /// and nothing else polls while this screen is up. Stops on settle, expiry, or leave.
+    /// While the QR is displayed, check THIS payment's status every few seconds — the CPM
+    /// outcome only exists server-side once the merchant charges. Stops on settle, expiry, or
+    /// leave.
     private func startReconcilePolling(for qr: PaymentQr) {
         reconcileTask?.cancel()
-        // Settlement is matched on THIS render's own transaction hash — never a time
-        // window. transactionHistory includes earlier settled rows, so a time heuristic
-        // ("recorded after now-15s") would let a just-settled PREVIOUS CPM payment show as this
-        // unscanned QR's outcome ("Paid — <merchant>" before the merchant charged). The hash is
-        // unique per render, so only the row for this QR can settle the display.
+        // Ask about this render's own transaction hash only: one request per check.
+        // `reconcilePendingTransactions()` asks about every pending payment on the device, so
+        // calling it on a 3 s loop sends a burst of requests each time and gets the wallet
+        // throttled (429) by the gateway. The hash is unique per render, so only the row for
+        // this QR can settle the display.
+        guard let hash = qr.transactionHash else { return }
         reconcileTask = Task { @MainActor in
             while !Task.isCancelled && settled == nil && !expired {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !Task.isCancelled else { return }
-                try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
+                // A check that could not be made carries a failureReason; this loop just asks again.
                 if let row = try? await VeyraWallet.shared.tokenisation
-                    .transactionHistory(tokenUniqueReference: qr.tokenUniqueReference ?? "", limit: 10)
-                    .first(where: { $0.transactionHash == qr.transactionHash }),
-                    // History returns this render's own PENDING row too — only a final
-                    // status settles the display; anything else keeps the QR up and polling.
+                    .refreshTransactionStatus(transactionHash: hash).value,
+                    // The row stays PENDING until the merchant charges — only a final status
+                    // settles the display; anything else keeps the QR up and polling.
                     let status = row.authorizationStatus,
                     ["APPROVED", "DECLINED", "FAILED"].contains(status.uppercased()) {
                     // Don't display the pre-backfill placeholder as a merchant name.

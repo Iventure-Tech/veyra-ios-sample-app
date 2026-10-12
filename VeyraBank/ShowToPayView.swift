@@ -191,7 +191,7 @@ struct ShowToPayView: View {
     private func startReconcilePolling(for qr: PaymentQr) {
         reconcileTask?.cancel()
         // Settlement is matched on THIS render's own transaction hash — never a time
-        // window. transactionHistory returns only TERMINAL rows, so a time heuristic
+        // window. transactionHistory includes earlier settled rows, so a time heuristic
         // ("recorded after now-15s") would let a just-settled PREVIOUS CPM payment show as this
         // unscanned QR's outcome ("Paid — <merchant>" before the merchant charged). The hash is
         // unique per render, so only the row for this QR can settle the display.
@@ -203,7 +203,10 @@ struct ShowToPayView: View {
                 if let row = try? await VeyraWallet.shared.tokenisation
                     .transactionHistory(tokenUniqueReference: qr.tokenUniqueReference ?? "", limit: 10)
                     .first(where: { $0.transactionHash == qr.transactionHash }),
-                    let status = row.authorizationStatus { // terminal by construction
+                    // History returns this render's own PENDING row too — only a final
+                    // status settles the display; anything else keeps the QR up and polling.
+                    let status = row.authorizationStatus,
+                    ["APPROVED", "DECLINED", "FAILED"].contains(status.uppercased()) {
                     // Don't display the pre-backfill placeholder as a merchant name.
                     let name = row.merchantName == "QR payment" ? nil : row.merchantName
                     settled = (approved: status == "APPROVED", merchantName: name)

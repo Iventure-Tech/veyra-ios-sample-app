@@ -133,7 +133,7 @@ let softpos = VeyraSoftPOS.shared
 
 Every other SoftPOS operation is a method on `softpos` — merchant registration and status, payments
 (tap, merchant QR, customer QR, cancel), history, receipts, status checks and the observers. They are
-listed in [SoftPOS — accepting payments](#softpos--accepting-payments).
+listed in [SoftPOS — accepting payments](#softpos-api).
 
 ### `VeyraWallet` (wallet features)
 
@@ -533,11 +533,36 @@ The sample app shows the pattern on its Home screen: a customer bar with **Switc
 
 ---
 
-## SoftPOS — accepting payments
+## SoftPOS API
 
 Every operation is a method on the SoftPOS object — `let softpos = VeyraSoftPOS.shared` — except the tap, which starts with `softpos.tap.start`. An operation that needs a registered merchant uses the one stored on this device; with none stored it answers `FAILED` / `MISSING_MANDATORY_CONFIG` (a payment: `NOT_SENT`) instead of throwing. All async methods throw `VeyraSoftPOSError` only for setup mistakes — everything else comes back as an outcome (see [Errors and outcomes](#errors-and-outcomes)) — and deliver events on the main queue.
 
-### Merchant registration & profile
+The calls fall into five groups, each opening with a table of its calls:
+
+- [Merchant registration and profile](#merchant-registration-and-profile)
+- [Tap to accept](#tap-to-accept)
+- [QR (MPM and CPM)](#qr-mpm-and-cpm)
+- [Transactions and receipts](#transactions-and-receipts), then [Retrying a payment safely](#retrying-a-payment-safely) and [Looking up a payment](#looking-up-a-payment)
+- [Observers](#observers)
+
+Moving from 3.0.0? See [Migrating from 3.0.0](#migrating-from-300).
+
+### Merchant registration and profile
+
+| Call | What it does | Returns |
+|---|---|---|
+| [`register(_ registration: MerchantRegistration) async throws`](#softposregister) | Registers the merchant on this device (`.personal` or `.business`) and persists it for the signed-in customer. | `MerchantRegistrationResult` |
+| [`banks() async throws`](#softposbanks) | Fetches the NUBAN settlement banks for the registration/update bank picker. | `SettlementBankList` |
+| [`updateMerchant(_ update: MerchantUpdate) async throws`](#softposupdatemerchant) | Updates the stored merchant's profile. | `MerchantStatus` |
+| [`activate() async throws`](#merchant-status--refreshstatus--activate--deactivate) / [`deactivate() async throws`](#merchant-status--refreshstatus--activate--deactivate) | Activate / deactivate the stored merchant. | `MerchantStatus` |
+| [`refreshStatus() async throws`](#merchant-status--refreshstatus--activate--deactivate) | The stored merchant's backend status now; on `APPROVED`, `status` is set (e.g. `"ACTIVE"`, `"DEACTIVATED"`) and the stored merchant's status is refreshed (firing `observeMerchantStatusChanged` when it changed). A read — never `PENDING`. | `MerchantStatus` |
+| `isRegistered()` | `true` when a complete merchant (ID, terminal, name, acquirer, MCC, country) is stored on this device. Gate your Get-paid entry on it. | `Bool` |
+| `storedMerchantData()` | The persisted merchant, or `nil`. | `StoredMerchant?` |
+| `storedMerchantID()` | The stored merchant's ID. | `String?` |
+| `hasStoredMerchant()` | Whether a merchant is stored at all (it may still be incomplete — gate payments on `isRegistered()`). | `Bool` |
+| `isMerchantActive()` | Whether the stored merchant may take payments by its last known status — the same reading the SDK's payment gate makes. `false` with no stored merchant; a merchant stored without a status reads as active. | `Bool` |
+| **`VeyraSoftPOS.storedMerchantData(customerID:)`** (static) | That customer's stored merchant, read **before `configure`** — nothing is signed in, started or claimed. | `StoredMerchant?` |
+| **`VeyraSoftPOS.isMerchantRegistered(customerID:)`** (static) | `isRegistered()` for that customer, **before `configure`**. Gate your Home screen's "Get paid" entry on it, and configure on the payment screen itself. | `Bool` |
 
 A device must have a **registered, active merchant** before it can accept payments. Registration persists the merchant on the device for the signed-in customer (SDK-owned storage, cleared on uninstall; a later successful registration overwrites it); the backend assigns the merchant ID, terminal ID and category code.
 
@@ -605,16 +630,7 @@ let banks = list.banks   // [SettlementBank]: slug, name, institutionCode
 
 #### Merchant status — `refreshStatus` / `activate` / `deactivate`
 
-| Member | Description |
-|-----|-------------|
-| `isRegistered() -> Bool` | `true` when a complete merchant (ID, terminal, name, acquirer, MCC, country) is stored on this device. Gate your Get-paid entry on it. |
-| `storedMerchantData() -> StoredMerchant?` | The persisted merchant, or `nil`. |
-| `storedMerchantID() -> String?` / `hasStoredMerchant() -> Bool` | The stored merchant's ID, and whether one is stored at all (it may still be incomplete — gate payments on `isRegistered()`). |
-| `isMerchantActive() -> Bool` | Whether the stored merchant may take payments by its last known status — the same reading the SDK's payment gate makes. `false` with no stored merchant; a merchant stored without a status reads as active. |
-| `refreshStatus()` | The stored merchant's backend status now → `MerchantStatus`; on `APPROVED`, `status` is set (e.g. `"ACTIVE"`, `"DEACTIVATED"`) and the stored merchant's status is refreshed (firing `observeMerchantStatusChanged` when it changed). A read — never `PENDING`. |
-| `activate()` / `deactivate()` | Activate / deactivate the stored merchant → `MerchantStatus`. |
-
-All four act on the stored merchant; with none stored they answer `FAILED` / `MISSING_MANDATORY_CONFIG` and send nothing.
+`refreshStatus()`, `activate()`, `deactivate()` and `updateMerchant(_:)` act on the stored merchant; with none stored they answer `FAILED` / `MISSING_MANDATORY_CONFIG` and send nothing.
 
 `MerchantStatus` is an outcome: `responseStatus`, `responseStatusReason`, `message`, plus `merchantID: String?` and `status: String?` when the gateway answered. Branch on `responseStatus`:
 
@@ -655,7 +671,16 @@ Returns `MerchantStatus` — the same outcome as `status`/`activate`/`deactivate
 
 ---
 
-### Tap acceptance
+### Tap to accept
+
+| Call | What it does | Returns |
+|---|---|---|
+| [`tap.start(_ request: TapRequest, onEvent: @escaping @Sendable (TapEvent) -> Void) throws`](#softpostapstart) | Arms the reader for one sale and reports every step on `onEvent`, ending with exactly one `.result`. Throws only a setup error. | Nothing — the outcome arrives as `.result(TapResult)` |
+| `TapRequest(amountMinorUnits:currency:merchantOrderID:)` | The sale to take: amount in minor units, `currency` (default `"566"`), your order id. | — |
+| `TapEvent` | `cardDetected`, `cardContactLost`, `unsupportedCard`, `cardReadingComplete`, `sendingRequestOnline`, `receivingOnlineResponse`, `result(TapResult)`, and — iOS only — `ended(outcome:)`. | — |
+| `isTransactionInProgress()` | A card is being read or the payment is online. | `Bool` |
+| `isAwaitingCardTap()` | The reader is armed and no card has been presented yet. | `Bool` |
+| [`cancelPayment(merchantOrderID: String)`](#cancelling-a-call) | Cancels the payment with that order ID; before the request is sent this stops the reader. | `CancelResult` |
 
 #### `softpos.tap.start`
 
@@ -722,11 +747,21 @@ let answer = softpos.cancelPayment(merchantOrderID: "ORDER-1042")
 
 ---
 
-### Get paid by QR (merchant-presented)
+### QR (MPM and CPM)
+
+| Call | What it does | Returns |
+|---|---|---|
+| [`createPaymentContext(amountMinorUnits:currency:merchantOrderID:onExpired:) async throws`](#softposcreatepaymentcontext) | Merchant-presented QR (MPM): creates a gateway-signed payment context for the stored merchant; render its payload as the QR. `onExpired` fires once when the QR lapses. | `PaymentContextQR` |
+| [`contextStatus(txRef: String) async throws`](#softposcontextstatus) | Polls the QR's payment context until it settles or expires. | `VeyraLookup<PaymentContextState>` |
+| `cancelQrExpiry()` | Stops the expiry watch `createPaymentContext` armed (call on settle and when the screen leaves). | — |
+| [`inspectCustomerQr(_ payload: String) async throws`](#softposinspectcustomerqr) | Customer-presented QR (CPM): decodes and validates a scanned payload. Nothing is sent. | `CustomerQrInspection` |
+| [`chargeCustomerQr(_ scanned: ScannedCustomerQr, merchantOrderID: String) async throws`](#softposchargecustomerqr) | Charges the confirmed customer QR for the amount it carries. | `CustomerQrChargeOutcome` |
+
+#### Get paid by QR (merchant-presented)
 
 The merchant keys the amount, the SDK creates a **gateway-signed payment context**, and your app renders the returned payload as a QR for the customer's wallet to scan. Poll the context until it settles.
 
-#### `softpos.createPaymentContext`
+##### `softpos.createPaymentContext`
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
@@ -748,7 +783,7 @@ Returns `PaymentContextQR` — an outcome. Branch on `responseStatus`:
 
 `txRef`, `mpmPayload`, `expiry` and `kid` are optional and set only on `APPROVED`.
 
-#### `softpos.contextStatus`
+##### `softpos.contextStatus`
 
 Poll `contextStatus(txRef:)` on a short interval (the sample uses 2.5 s). It is a read and returns `VeyraLookup<PaymentContextState>`: `value` is the context's state, or `nil` with a `failureReason` when the poll could not be made — just ask again; a failed poll changes nothing. States: `PENDING` (QR live) → `IN_FLIGHT` (wallet push settling) → `APPROVED` / `DECLINED` (settled — `responseCode` carries the rail outcome) or `EXPIRED`. Convenience: `isSettled` (`APPROVED || DECLINED`), `isApproved`. On settlement the payment is also recorded in the merchant's local history under the same `txRef`, so receipts work like any other rail.
 
@@ -782,17 +817,17 @@ while !Task.isCancelled {
 
 ---
 
-### Charge a customer QR (consumer-presented)
+#### Charge a customer QR (consumer-presented)
 
 The customer shows a payment QR from their Veyra wallet; the merchant scans it, **confirms the QR's own amount** (the amount is bound inside the QR's cryptogram — it is never keyed on the merchant side), and charges.
 
-#### `softpos.inspectCustomerQr`
+##### `softpos.inspectCustomerQr`
 
 Decode and validate a scanned payload. Nothing is sent. Returns a `CustomerQrInspection` outcome: `APPROVED` with `qr` set, or `FAILED` / `INVALID_REQUEST` (`qr` is `nil`) when the payload is not a Veyra payment QR — show a transient hint and stay armed for another scan; it is not a terminal failure.
 
 `CustomerQrInspection`: `qr: ScannedCustomerQr?`, `responseStatus`, `responseStatusReason`, `message`. `ScannedCustomerQr`: `maskedCard` (last 4 for display), `amountMinorUnits` (the QR's own amount — confirm, never re-key), `currencyNumeric`, `cardholderName` (the paying card's display name, e.g. `AFRIGO ****1234` — the same value a tap presents; **display only**, it rides outside the QR's cryptogram, so never branch a payment decision on it; `nil` when the QR carries none).
 
-#### `softpos.chargeCustomerQr`
+##### `softpos.chargeCustomerQr`
 
 Charge the confirmed QR synchronously over the standard payment rail. A tampered payload or altered amount declines at the server.
 
@@ -816,17 +851,28 @@ lastPaymentReference = outcome.reference.isEmpty ? nil : outcome.reference   // 
 showResult(status: outcome.responseStatus, reason: outcome.responseStatusReason, code: outcome.responseCode)
 ```
 
-`CustomerQrChargeOutcome`: `responseStatus` (`APPROVED` · `DECLINED` · `FAILED` · `PENDING` · `RETRY` · `NOT_SENT` — branch on this), `responseStatusReason` (`INSUFFICIENT_FUNDS`, `NO_RESPONSE_RECEIVED`, `NO_NETWORK_CONNECTION`…; show and log it), `responseCode` (the wire code — for receipts and support, never to branch on; `nil` on `NOT_SENT`), `approved: Bool` (true only when `responseStatus == "APPROVED"` — never worked out from the code), `transactionID`, `reference`, plus `creditTransactionID` + `isCreditConfirmationSupported` (populated on approved charges — the cue to wait for credit confirmation, see `getCreditConfirmation`). A `PENDING` charge may have gone through: never charge again — the SDK resolves it in the background.
+`CustomerQrChargeOutcome`: `responseStatus` (`APPROVED` · `DECLINED` · `FAILED` · `PENDING` · `RETRY` · `NOT_SENT` — branch on this), `responseStatusReason` (`INSUFFICIENT_FUNDS`, `NO_RESPONSE_RECEIVED`, `NO_NETWORK_CONNECTION`…; show and log it), `responseCode` (the wire code — for receipts and support, never to branch on; `nil` on `NOT_SENT`), `approved: Bool` (true only when `responseStatus == "APPROVED"` — never worked out from the code), `transactionID`, `reference`, plus `creditTransactionID` + `isCreditConfirmationSupported` (populated on approved charges — the cue to wait for credit confirmation, see [`creditConfirmation`](#softposcreditconfirmation)). A `PENDING` charge may have gone through: never charge again — the SDK resolves it in the background.
 
 > **Who mints the reference.** `reference` is minted by the **SDK** (`{terminalId}-YYYYMMDDHHmmssSSS`) so the gateway can guarantee it is unique per merchant — your app does not supply it, and it is the key for receipts, status lookups and credit confirmation. `merchantOrderID` is the field for **your** identifier: **required** on every merchant payment and echoed back. An order can take several attempts, and the same order ID is used for each of them **until the order is paid or possibly paid**: a new attempt is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` (and `createPaymentContext` ends `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` with no QR created) only while the order is `APPROVED` or `PENDING`. The refusal carries the attempt that decided it as `originalPayment` (on `TapResult`, `CustomerQrChargeOutcome` and `PaymentContextQR`) — its `responseStatus` says whether the order is already paid (`APPROVED`) or still being confirmed (`PENDING`), so tell the merchant which and do not take another payment for it. After `DECLINED`, `FAILED`, `RETRY` or `NOT_SENT`, try again under the **same** order ID. `createPaymentContext`, `chargeCustomerQr` and `tap.start` all require it: omitting it does not compile, and a blank (or over-255-character) value ends the call `NOT_SENT` / `INVALID_REQUEST` before anything is sent. See [The merchant order ID](#the-merchant-order-id).
 
 ---
 
-### Merchant transactions & receipts
+### Transactions and receipts
+
+| Call | What it does | Returns |
+|---|---|---|
+| [`transactions(limit: Int = 50) async throws`](#softpostransactions--transaction) | The payments this device took, most recent first, all rails. Local, no network. | `[MerchantTransaction]` |
+| [`transaction(merchantTransactionReference:) async throws`](#softpostransactions--transaction) | One stored transaction. | `MerchantTransaction?` |
+| [`receipt(merchantTransactionReference:) async throws`](#softposreceiptmerchanttransactionreference) | The receipt for one transaction, with a receipt QR payload the customer's wallet can scan. | `MerchantReceipt?` |
+| [`paymentStatus(merchantOrderID:) async throws`](#looking-up-a-payment) | The status of an order across all its attempts and rails, by your order ID. | `VeyraLookup<OrderPaymentStatus>` |
+| [`refreshTransactionStatus(merchantTransactionReference:) async throws`](#softposrefreshtransactionstatusmerchanttransactionreference) | Asks the gateway about one `PENDING` transaction now and updates the stored row. | `VeyraLookup<MerchantTransaction>` |
+| [`refreshCreditConfirmation(merchantTransactionReference:) async throws`](#softposrefreshcreditconfirmationmerchanttransactionreference) | Asks now whether an approved sale's funds reached the merchant's bank and updates the stored row. | `VeyraLookup<MerchantTransaction>` |
+| [`transactionStatus(merchantTransactionReference:transactionDate:) async throws`](#softpostransactionstatus) | The gateway's raw record of one of the stored merchant's transactions; writes nothing. | `VeyraLookup<[TransactionStatus]>` |
+| [`creditConfirmation(creditTransactionID:amountMinorUnits:) async throws`](#softposcreditconfirmation) | Asks, by credit id, whether the merchant's bank has received a sale's funds; writes nothing. | `VeyraLookup<CreditConfirmation>` |
 
 The SDK records every payment it takes — tap, get-paid QR and customer-QR charge — locally at its terminal outcome, so history needs no backend round trip.
 
-#### `softpos.getTransactions` / `getTransaction`
+#### `softpos.transactions` / `transaction`
 
 ```swift
 let transactions = try await softpos.transactions(limit: 50)
@@ -860,7 +906,7 @@ label.
 
 **Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is.
 
-**Let the merchant ask on demand — `refreshTransactionStatus(merchantTransactionReference:)`.** The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never invents an outcome — a row that ages out simply stops being asked about and stays `PENDING`. Expose **`refreshStatus`** in your UI so the merchant can ask on demand, which is the route for anything still pending after the window closes.
+**Let the merchant ask on demand — `refreshTransactionStatus(merchantTransactionReference:)`.** The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never invents an outcome — a row that ages out simply stops being asked about and stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the merchant can ask on demand, which is the route for anything still pending after the window closes.
 
 A failed poll — device offline, gateway unreachable, an unreadable answer — changes nothing at all: the SDK backs off and asks again, and the row is left exactly as it was. "We could not reach the server" is never recorded as "the payment failed".
 
@@ -896,7 +942,7 @@ background sweep writes, so an on-demand check and a background check can never 
 
 Distinct from `transactionStatus(merchantTransactionReference:transactionDate:)`, which
 remains the **raw** query: that one returns whatever the gateway said and writes nothing to the
-store, for developers who want the unfiltered answer. `refreshStatus` is the one that updates the row
+store, for developers who want the unfiltered answer. `refreshTransactionStatus` is the one that updates the row
 your history screen renders.
 
 **Platform note — the sweep is app-scoped.** It starts when the SDK is configured and runs for as long as the app process is alive, across every in-app navigation and whatever screen is up; no screen starts or stops it. iOS suspends timers when the OS suspends the app, so there is **no OS background execution** — the sweep pauses with the app and resumes on foreground. That costs time, never an answer: every result is written to the store, so a row resolved while you were elsewhere is simply there when you look.
@@ -913,11 +959,11 @@ guard let receipt = try await softpos.receipt(merchantTransactionReference: refe
 
 The receipt returns the payload string (`qrPayload`) for you to render, and carries `transactionHash` — the join key the customer wallet verifies against before storing the receipt.
 
-#### `softpos.getTransactionStatus`
+#### `softpos.transactionStatus`
 
 Backend status query by reference: `transactionStatus(merchantTransactionReference:transactionDate:)` (date `YYYY-MM-DD`) for the stored merchant → `VeyraLookup<[TransactionStatus]>`: `value` is the gateway's rows (`responseStatus` + `responseStatusReason` — branch on these —, `responseCode`, `amount`, `transactionID`, `merchantStatus`, `creditTransactionID`, `isCreditConfirmationSupported`), or `nil` with a `failureReason` when the query could not be made. It writes nothing. Use the local history for everyday listing; this is for reconciliation against the backend.
 
-#### `softpos.getCreditConfirmation`
+#### `softpos.creditConfirmation`
 
 Beneficiary credit confirmation: has the merchant's bank actually **received the funds** of an approved sale? Settlement confirmation only — it never changes the sale's payment outcome.
 
@@ -936,7 +982,7 @@ guard let confirmation = lookup.value else {
 
 **The SDK owns the polling on every platform, app-scoped — never screen-scoped.** On iOS the SDK's background sweep starts at configure time and keeps asking the merchant's bank (exponential backoff, up to 30 days) for as long as the app is alive, whatever screen is up, persisting each answer onto the sale's stored history row (`creditConfirmationStatus`). iOS suspends timers when the app is backgrounded — that is expected: the sweep keeps running across in-app navigation and resumes when the app returns to the foreground; there is no OS background execution. Apps should therefore **render the store, not poll**: this manual fetch remains for an on-demand check (stop on `"RECEIVED"`; treat `"UNABLE_TO_CONFIRM"` as "not confirmed yet", never as "not received").
 
-**Recommended pattern — the result screen renders the stored row** (see the sample's `GetPaidView`): when an approved sale says the merchant's bank supports confirmation, show "Confirming credit with merchant bank…" and re-read the sale's row from `getTransactions(...)` every few seconds while the screen is visible, flipping the line to "Funds received by merchant bank" when the SDK's sweep stamps `"RECEIVED"` (or to the could-not-confirm copy only on the stored final 30-day give-up). Leaving the screen stops only the rendering — the SDK keeps polling, and the history/transaction views show the updated state on return. Where the supported flag comes from differs by rail:
+**Recommended pattern — the result screen renders the stored row** (see the sample's `GetPaidView`): when an approved sale says the merchant's bank supports confirmation, show "Confirming credit with merchant bank…" and re-read the sale's row from `transactions(limit:)` every few seconds while the screen is visible, flipping the line to "Funds received by merchant bank" when the SDK's sweep stamps `"RECEIVED"` (or to the could-not-confirm copy only on the stored final 30-day give-up). Leaving the screen stops only the rendering — the SDK keeps polling, and the history/transaction views show the updated state on return. Where the supported flag comes from differs by rail:
 
 - **Customer-QR charge (CPM):** `chargeCustomerQr`'s outcome carries `creditTransactionID` + `isCreditConfirmationSupported` directly — show the waiting line at once.
 - **Merchant-presented QR (MPM):** the context settle carries no credit fields (the contexts endpoint never does); the SDK learns them from the transaction-status rail moments after the settle, so just watch the stored row until `isCreditConfirmationSupported` turns up `true`.
@@ -1094,6 +1140,16 @@ merchant answers `MISSING_MANDATORY_CONFIG` (with the local value, if any). The 
 by order ID — order IDs belong to the merchant side.
 
 The sample has a **Look up** field on its merchant Transactions view (`MerchantTransactionsView.lookUpOrder`).
+
+### Observers
+
+| Call | What it does | Returns |
+|---|---|---|
+| [`observeTransactionResolved(_ observer: @escaping @Sendable (TransactionResolution) -> Void) throws`](#observetransactionresolved--the-sdk-pushes-the-answer) · `stopObservingTransactionResolved() throws` | Fires when a transaction left `PENDING` — on any rail, including one started in an earlier app session. `TransactionResolution`: `reference`, `status`, `reason`, `responseCode`. | Nothing; the observer gets a `TransactionResolution` |
+| [`observeCreditConfirmation(_ observer: @escaping @Sendable (SaleCreditConfirmation) -> Void) throws`](#observecreditconfirmation--the-funds-landed) · `stopObservingCreditConfirmation() throws` | Fires when an approved sale's funds were confirmed in the merchant's bank (`"RECEIVED"`), or the SDK gave up after 30 days (`"UNABLE_TO_CONFIRM"` — never "not received"). | Nothing; the observer gets a `SaleCreditConfirmation` |
+| [`observeMerchantStatusChanged(_ observer: @escaping @Sendable (MerchantStatusChange) -> Void) throws`](#observemerchantstatuschanged--the-sdk-watches-it-for-you) · `stopObservingMerchantStatusChanged() throws` | Fires when the stored merchant's backend status changed. `MerchantStatusChange`: `merchantID`, `status`, `canAcceptPayments`, `previousStatus`. | Nothing; the observer gets a `MerchantStatusChange` |
+
+Each observer has **one listener — the last registration wins** —, is delivered on the main queue, has **no replay** (read the store at start-up for anything that happened while your app was not listening), and is dropped on sign-out. Register once, at start-up. Each is covered in full, with an example, where its outcome is explained: [`observeTransactionResolved`](#observetransactionresolved--the-sdk-pushes-the-answer), [`observeCreditConfirmation`](#observecreditconfirmation--the-funds-landed) and [`observeMerchantStatusChanged`](#observemerchantstatuschanged--the-sdk-watches-it-for-you).
 
 ---
 

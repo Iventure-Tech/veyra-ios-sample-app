@@ -226,7 +226,9 @@ struct HomeView: View {
         mode = ((try? VeyraSDK.shared.currentMode) ?? .none)
         signedIn = DemoSession.isSignedIn
         customerID = DemoSession.customerID
-        registered = signedIn && VeyraSoftPOS.shared.isRegistered()
+        // The SDK's init-free read for the signed-in customer: Home gates "Get paid" without
+        // configuring the SoftPOS SDK (only the payment screens do that).
+        registered = signedIn && VeyraSoftPOS.isMerchantRegistered(customerID: customerID)
     }
 
     private func merchantAction(activate: Bool) async {

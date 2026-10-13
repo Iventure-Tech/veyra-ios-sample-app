@@ -570,7 +570,7 @@ A device must have a **registered, active merchant** before it can accept paymen
 
 #### `softpos.register`
 
-Register the merchant on this device. Personal merchants require a BVN; business merchants require a CAC number — and may supply a BVN too (the account holder behind a business has one). All other fields are mandatory for both, except `walletAccountID`. There is no acquirer id: the gateway resolves it from your payment app provider and returns it on the response.
+Register the merchant on this device. A BVN is optional for both merchant types; business merchants require a CAC number. All other fields are mandatory for both, except `walletAccountID`. There is no acquirer id: the gateway resolves it from your payment app provider and returns it on the response.
 
 ```swift
 let result = try await softpos.register(

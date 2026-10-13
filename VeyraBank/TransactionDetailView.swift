@@ -292,8 +292,8 @@ struct TransactionDetailView: View {
         while !Task.isCancelled && liveRow.creditConfirmationStatus == nil {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             if Task.isCancelled { return }
-            let rows = (try? await VeyraWallet.shared.tokenisation
-                .transactionHistory(tokenUniqueReference: tokenUniqueReference, limit: 100)) ?? []
+            let rows = (try? await VeyraWallet.shared
+                .getTransactions(tokenUniqueReference: tokenUniqueReference, limit: 50)) ?? []
             if let fresh = rows.first(where: { $0.transactionHash == hash }) { live = fresh }
         }
     }

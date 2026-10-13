@@ -149,6 +149,7 @@ let tokenisation = VeyraWallet.shared.tokenisation
 | `signOut()` | Static. The customer has logged out: stops everything the wallet runs for them (key top-ups, status syncs, history sweeps) and drops every observer registration. Their cards, keys, history and receipts stay on the device. Until the next `configure` every call throws `VeyraWalletError.notSignedIn`. |
 | `shared` | The singleton. |
 | `tokenisation` | The wallet service — bank lookup, eligibility, digitise, activation, cards, payments, history, receipts — plus `cancelDigitise(clientRequestID:)` and `cancelPayment(merchantOrderID:)` (scan to pay), which cancel a call while it is still on the phone (see [Cancelling a call](#cancelling-a-call)). |
+| `getTransactions(tokenUniqueReference:limit:)` | The card's transaction history, most recent first (`limit` default 50). Local read. See [`getTransactions`](#gettransactions). |
 | `paymentApplicationInstanceID()` | This install's SDK-generated `payment_application_instance_id` (`VYRA` + 32 hex chars): minted on first use, persisted install-scoped (never backed up), new on reinstall. Read-only. |
 
 ---
@@ -1545,14 +1546,16 @@ throttled (`429`) by the gateway.
 
 ### History, receipts & maintenance
 
-#### `tokenisation.transactionHistory`
+#### `getTransactions`
 
-The card's full local history across every rail (tap, scanned QR, shown QR), most recent first. No network call.
+The card's full local history across every rail iOS has (scanned QR, shown QR), most recent first. No network call. Empty when no card on this device has that reference, or the card has no payments yet. Called on `VeyraWallet.shared` — the same name and default (`limit: 50`) as on Android and React Native.
 
 ```swift
-let history = try await VeyraWallet.shared.tokenisation
-    .transactionHistory(tokenUniqueReference: ref, limit: 100)
+let history = try await VeyraWallet.shared.getTransactions(tokenUniqueReference: ref)          // last 50
+let lastFive = try await VeyraWallet.shared.getTransactions(tokenUniqueReference: ref, limit: 5)
 ```
+
+`tokenisation.transactionHistory(tokenUniqueReference:limit:)` is **deprecated**: the same read, still working, with its old default of 100. Move to `VeyraWallet.shared.getTransactions(tokenUniqueReference:limit:)`.
 
 `TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED` / `RETRY`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderID` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, generated-QR rows learn it from the status poll, so `nil` on a still-open row means "not learned yet", not "no order id"; for display and reconciliation — receipts and status refreshes key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
@@ -1587,7 +1590,7 @@ delivered on the main thread. `stopObservingTransactionResolved()` clears it.
 
 Did the money actually reach the merchant's bank? The wallet asks the same question the merchant's own SDK asks about that sale, from the payer's side — **settlement confirmation only**, it never changes or restates the payment outcome.
 
-**The SDK does the polling; your view renders the stored row.** Once a payment is approved, a sweep started at `configure(_:customerID:)` for the signed-in customer asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`transactionHistory(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
+**The SDK does the polling; your view renders the stored row.** Once a payment is approved, a sweep started at `configure(_:customerID:)` for the signed-in customer asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`getTransactions(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
 
 These three fields are the **eligibility contract**: they are how you decide whether to render a
 credit line at all, and whether you may call `refreshCreditConfirmation` (below). They are not merely
@@ -1654,14 +1657,14 @@ Reconcile still-`PENDING` rows against the backend **right now**. The SDK's own 
 
 Unlike the scheduled sweep it ignores both the backoff and the 30-day window — an explicit ask always reaches the backend, and it is the supported way to check a row the sweep has stopped polling. A row whose own check fails is left exactly as it was.
 
-It is a read, so it states no status of its own: it answers a `ReconcileResult` whose `failureReason` is set only when the reconcile itself could not run (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …) — `checked` is `true` when it ran. Read the updated rows from `transactionHistory` either way. Only a [setup error](#setup-errors--thrown) throws.
+It is a read, so it states no status of its own: it answers a `ReconcileResult` whose `failureReason` is set only when the reconcile itself could not run (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …) — `checked` is `true` when it ran. Read the updated rows from `getTransactions` either way. Only a [setup error](#setup-errors--thrown) throws.
 
 ```swift
 let reconcile = try await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
 if let reason = reconcile.failureReason {         // the reconcile could not run
     note = reason == "NO_NETWORK_CONNECTION" ? "No internet connection." : "Could not check right now (\(reason))."
 }
-let rows = try await VeyraWallet.shared.tokenisation.transactionHistory(tokenUniqueReference: card)   // read the updated rows
+let rows = try await VeyraWallet.shared.getTransactions(tokenUniqueReference: card)   // read the updated rows
 ```
 
 #### `refreshTransactionStatus`
@@ -1747,7 +1750,7 @@ Task {
 
 #### `recentActivity`
 
-`recentActivity(tokenUniqueReference:)` → `[TokenActivity]` — the card's terminal scan-to-pay outcomes (`merchantName`, `amountMinorUnits`, `status` `"APPROVED"`/`"DECLINED"`, `atEpochMillis`), most recent first, local read. Use `transactionHistory` for the full multi-rail list.
+`recentActivity(tokenUniqueReference:)` → `[TokenActivity]` — the card's terminal scan-to-pay outcomes (`merchantName`, `amountMinorUnits`, `status` `"APPROVED"`/`"DECLINED"`, `atEpochMillis`), most recent first, local read. Use `getTransactions` for the full multi-rail list.
 
 ---
 
@@ -2144,7 +2147,7 @@ with the reason, and is always safe to retry as is.
 | `merchant.banks()` | `SettlementBankList` | `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
 | `tokenisation.payScannedContext(_:)` | `PaymentOutcome` | `responseStatus`, `responseStatusReason`, `responseCode`, `message`; `approved` is `responseStatus == "APPROVED"` |
 | `tokenisation.showQrToPay(amountMinorUnits:onExpired:)` | `PaymentQr` | `responseStatus` (`APPROVED` or `NOT_SENT` only — nothing is sent), `responseStatusReason`, `message`. The merchant submits the payment; its outcome lands on the history row |
-| `tokenisation.transactionHistory(...)` | `[TransactionSummary]` | `authorizationStatus`, `responseCode`, `responseStatusReason` |
+| `getTransactions(...)` | `[TransactionSummary]` | `authorizationStatus`, `responseCode`, `responseStatusReason` |
 | `tokenisation.refreshTransactionStatus(transactionHash:)` / `refreshCreditConfirmation(transactionHash:)` | `VeyraLookup<TransactionSummary>` | the row, or `failureReason` |
 | `tokenisation.observeTransactionResolved { }` | `WalletTransactionResolution` | `status`, `responseCode`, `reason` |
 | `tokenisation.digitise(...)` / `verifyAccount(...)` | `DigitiseResult` / `VerifyAccountResponse` | `responseCode` (the issuer's decision — see [Table C](#table-c--veyra-token-service-wallet)), `responseStatus`, `responseStatusReason`, `message`. Never `PENDING` |
@@ -2463,7 +2466,7 @@ A `PENDING` payment may well have completed, so the one thing you must not do is
 2. **Let the SDK resolve it.** It stores the transaction and polls with backoff; you do not have to.
 3. **Finish when it settles** — from `onTransactionResolved` (below), or by reading the row with
    `transactions.refreshStatus(reference:)` / `transactions.history(limit:)`. On the wallet,
-   `observeTransactionResolved` and `transactionHistory` do the same.
+   `observeTransactionResolved` and `getTransactions` do the same.
 
 A pending row always converges: it becomes `APPROVED`, `DECLINED` or `FAILED` when the backend settles
 it — or `RETRY` (`25` / `UNABLE_TO_LOCATE_RECORD`) when Veyra has no record of it, so nothing was

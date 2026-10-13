@@ -150,6 +150,7 @@ let tokenisation = VeyraWallet.shared.tokenisation
 | `shared` | The singleton. |
 | `tokenisation` | The wallet service — bank lookup, eligibility, digitise, activation, cards, payments, history, receipts — plus `cancelDigitise(clientRequestID:)` and `cancelPayment(merchantOrderID:)` (scan to pay), which cancel a call while it is still on the phone (see [Cancelling a call](#cancelling-a-call)). |
 | `getTransactions(tokenUniqueReference:limit:)` | The card's transaction history, most recent first (`limit` default 50). Local read. See [`getTransactions`](#gettransactions). |
+| `openPaySession()` / `closePaySession()` / `isPaySessionOpen` | The tap-to-pay pay session — the same three calls as Android and React Native, so one integration runs everywhere. iPhone cannot pay by tap, so `openPaySession()` always answers `PaySessionResult` `FAILED` / `NFC_UNAVAILABLE` (the same answer an Android phone without NFC gives — offer QR), `closePaySession()` does nothing, and `isPaySessionOpen` is `false`. |
 | `paymentApplicationInstanceID()` | This install's SDK-generated `payment_application_instance_id` (`VYRA` + 32 hex chars): minted on first use, persisted install-scoped (never backed up), new on reinstall. Read-only. |
 
 ---
@@ -1370,7 +1371,10 @@ if !selection.selected {                          // FAILED / CARD_NOT_FOUND
 `CardSelection`: `responseStatus`, `responseStatusReason`, `message`, plus `selected: Bool` (the same
 fact as `responseStatus == "APPROVED"`). The result is `@discardableResult`.
 
-**Tap-to-pay is Android-only** — on iOS the wallet pays by QR (Apple restricts card emulation).
+**Tap-to-pay is Android-only** — on iOS the wallet pays by QR (Apple restricts card emulation). The
+pay-session calls (`openPaySession()`, `closePaySession()`, `isPaySessionOpen`) still exist with the
+same names as on Android, so shared code needs no platform check: opening answers `FAILED` /
+`NFC_UNAVAILABLE`, which you handle as on an Android phone without NFC — show the QR rails.
 
 #### `tokenisation.deactivateToken`
 
@@ -2188,6 +2192,7 @@ produce on iOS. **`NOT_SENT` rows apply to payments and add-card only** (see
 | `NOT_SENT` | — | `CARD_CANNOT_PAY` | Wallet: the active card's material can't make a scan-to-pay payment | Remove the card and add it again |
 | `NOT_SENT` | — | `SDK_INTERNAL_ERROR` | The SDK failed before sending | Report to support; retry with the same order ID |
 | `FAILED` | — | `CARD_NOT_FOUND` | Wallet: `setActiveToken` was given a reference that is not in this wallet | Refresh the card list |
+| `FAILED` | — | `NFC_UNAVAILABLE` | Wallet: `openPaySession()` — iPhone cannot pay by tap; always the answer on iOS | Offer the QR rails |
 | `FAILED` | — | `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` | Wallet: `processReceipt` refused the scanned receipt (see [`processReceipt`](#tokenisationprocessreceipt--receipts--receiptfortransactionhash)) | Show the reason; for `PAYMENT_NOT_CONFIRMED`, scan again shortly |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | Payments: the request was sent but no answer came back (timeout, connection lost) | Wait; the SDK stores the payment and resolves it |
 | `PENDING` | `06` | `UPSTREAM_ERROR` | Payments: Veyra answered with an error or something unreadable | Wait; the SDK stores the payment and resolves it |

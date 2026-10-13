@@ -133,7 +133,7 @@ struct GetPaidView: View {
         // Mode is SDK-managed: the tap session claims SOFTPOS when it starts and releases it
         // when it ends — no screen choreography needed here.
         .onAppear {
-            merchant = VeyraSoftPOS.shared.getStored()
+            merchant = VeyraSoftPOS.shared.stored()
         }
         .onDisappear {
             autoReturnTask?.cancel()
@@ -163,7 +163,7 @@ struct GetPaidView: View {
             Button("View receipt") {
                 autoReturnTask?.cancel()
                 Task { @MainActor in
-                    if let receipt = try? await VeyraSoftPOS.shared.getReceipt(merchantTransactionReference: reference) {
+                    if let receipt = try? await VeyraSoftPOS.shared.receipt(merchantTransactionReference: reference) {
                         resultReceipt = receipt
                     } else {
                         resultReceiptError = true
@@ -855,14 +855,14 @@ struct GetPaidView: View {
         // interval later. This is a notification, not the truth: the store re-read below stays,
         // and is what covers a screen opened after the fact. Registration is single-listener —
         // the next sale's watch replaces this one.
-        try? VeyraSoftPOS.shared.onCreditConfirmation { confirmation in
+        try? VeyraSoftPOS.shared.observeCreditConfirmation { confirmation in
             guard confirmation.reference == reference else { return }
             creditConfirmState = confirmation.status == "RECEIVED" ? .received : .unable
             scheduleAutoReturn()
         }
         creditWatchTask = Task { @MainActor in
             while !Task.isCancelled {
-                let row = try? await VeyraSoftPOS.shared.getTransaction(merchantTransactionReference: reference)
+                let row = try? await VeyraSoftPOS.shared.transaction(merchantTransactionReference: reference)
                 if let row {
                     if let status = row.creditConfirmationStatus {
                         creditConfirmState = status == "RECEIVED" ? .received : .unable
@@ -974,7 +974,7 @@ struct GetPaidView: View {
         guard !isActive, merchant != nil else { return }
         // The facade refreshes the stored merchant's status as part of the lookup.
         _ = try? await VeyraSoftPOS.shared.refreshStatus()
-        merchant = VeyraSoftPOS.shared.getStored()
+        merchant = VeyraSoftPOS.shared.stored()
     }
 }
 

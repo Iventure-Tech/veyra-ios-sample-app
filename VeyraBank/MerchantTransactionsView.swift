@@ -251,7 +251,7 @@ struct MerchantTransactionsView: View {
 
     private func load() async {
         do {
-            transactions = try await VeyraSoftPOS.shared.getTransactions(limit: 50)
+            transactions = try await VeyraSoftPOS.shared.transactions(limit: 50)
         } catch {
             loadError = "Couldn't load transactions"
         }
@@ -333,7 +333,7 @@ struct MerchantTransactionsView: View {
 
     private func loadReceipt(_ reference: String) async {
         // Distinguish "load failed / no receipt" (alert) from success (sheet).
-        if let loaded = try? await VeyraSoftPOS.shared.getReceipt(merchantTransactionReference: reference) {
+        if let loaded = try? await VeyraSoftPOS.shared.receipt(merchantTransactionReference: reference) {
             receipt = loaded
         } else {
             receiptError = true

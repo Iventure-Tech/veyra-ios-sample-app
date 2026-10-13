@@ -40,10 +40,10 @@ struct MerchantSettingsView: View {
 
     /// Prefill at **init** (before first render), not in `onAppear`: values set in `onAppear`
     /// don't reflect in a `TextField` until the field re-renders (which is why they only
-    /// appeared after focusing each one). `getStored()` is synchronous, so the whole form
+    /// appeared after focusing each one). `stored()` is synchronous, so the whole form
     /// can be seeded here and shows populated on load.
     init() {
-        let storedMerchant = VeyraSoftPOS.shared.getStored()
+        let storedMerchant = VeyraSoftPOS.shared.stored()
         _stored = State(initialValue: storedMerchant)
 
         let s = SampleData.personal // registration defaults (isBusiness starts false)
@@ -76,7 +76,7 @@ struct MerchantSettingsView: View {
     /// Refresh after register / clear (user-driven, so re-render already happens): re-read the
     /// stored merchant and re-seed the fields.
     private func load() {
-        stored = VeyraSoftPOS.shared.getStored()
+        stored = VeyraSoftPOS.shared.stored()
         if let merchant = stored {
             merchantName = merchant.merchantName
             email = merchant.emailAddress
@@ -107,7 +107,7 @@ struct MerchantSettingsView: View {
 
     private func loadBanks() async {
         do {
-            let list = try await VeyraSoftPOS.shared.getSettlementBanks()
+            let list = try await VeyraSoftPOS.shared.settlementBanks()
             banks = list.banks
             // An empty bank picker on an offline device must say why — reconnecting is the only
             // thing that fixes it, and the merchant cannot guess that.

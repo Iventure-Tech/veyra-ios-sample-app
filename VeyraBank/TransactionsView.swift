@@ -56,8 +56,8 @@ struct TransactionsView: View {
     private func load() async {
         loading = true
         defer { loading = false }
-        history = (try? await VeyraWallet.shared.tokenisation
-            .transactionHistory(tokenUniqueReference: tokenUniqueReference, limit: 100)) ?? []
+        history = (try? await VeyraWallet.shared
+            .getTransactions(tokenUniqueReference: tokenUniqueReference, limit: 50)) ?? []
         var receipts: [String: TransactionReceipt] = [:]
         for tx in history {
             guard let hash = tx.transactionHash else { continue }

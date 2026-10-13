@@ -390,7 +390,7 @@ struct PayView: View {
             Task { await reload() }
         }
         // Keys ran out, or a refresh replenished them — `requiresOnline` drives `activeCardBlocked`.
-        try? VeyraWallet.shared.observeCardKeyStateChanged { _, _ in
+        try? VeyraWallet.shared.observeCardKeyStateChanged { _ in
             Task { await reload() }
         }
     }

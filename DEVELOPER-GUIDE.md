@@ -1809,7 +1809,7 @@ There is deliberately no manual refresh call and no key count to read — the SD
 |---|---|---|
 | `observeTokenStatusChanged(onTokenStatusChanged:)` / `stopObservingTokenStatusChanged()` | The issuer changed a token's status | `TokenStatusChange` to the callback |
 | `observeTransactionResolved(onTransactionResolved:)` / `stopObservingTransactionResolved()` | A `PENDING` payment reached its outcome | `WalletTransactionResolution` to the callback |
-| `observeCardKeyStateChanged(onKeyStateChanged:onDeviceNotBound:)` / `stopObservingCardKeyStateChanged()` | A token ran out of payment keys, got them back, or can never be re-keyed on this phone | `tokenUniqueReference`, `requiresOnline` to the callback |
+| `observeCardKeyStateChanged(_:)` / `stopObservingCardKeyStateChanged()` | A token ran out of payment keys, got them back, or can never be re-keyed on this phone | `CardKeyStateEvent` (`tokenUniqueReference`, `requiresOnline`, `deviceNotBound`) to the listener |
 | `observePaymentRefusals(forTokenUniqueReference:onRequireOnline:onAmountExceedCardLimit:onDeviceNotBound:)` / `stopObservingPaymentRefusals(forTokenUniqueReference:)` | A payment with this token was refused before anything was sent | the refusal to the matching callback |
 
 Callbacks arrive on the main thread. Each registration is dropped on sign-out and on a customer switch — register again after every `configure` (see [Customers](#customers-signing-in-signing-out-switching)).
@@ -1871,20 +1871,19 @@ push version of that same value, read from the same function, so a callback can 
 list you are about to draw.
 
 ```swift
-try wallet.observeCardKeyStateChanged(
-    onKeyStateChanged: { tokenUniqueReference, requiresOnline in
-        // grey the card, or un-grey it
-    },
-    onDeviceNotBound: { tokenUniqueReference in   // optional — defaults to nil
+try wallet.observeCardKeyStateChanged { event in
+    if event.deviceNotBound {
         // "add this card again on this phone" — going online will not help
+    } else {
+        // grey the card while event.requiresOnline, un-grey it when it clears
     }
-)
+}
 ```
 
-When a card becomes not-bound to this device and you supply `onDeviceNotBound`, it fires **instead
-of** `onKeyStateChanged` for that change. Without it, `onKeyStateChanged` reports
-`requiresOnline == false` for that card — so read `deviceNotBound` from the card list rather than
-un-greying it.
+One listener receives every change as a `CardKeyStateEvent` — `tokenUniqueReference`,
+`requiresOnline` and `deviceNotBound` — the same event Android and React Native deliver. When a card
+can never be re-keyed on this phone, `deviceNotBound` is `true` and `requiresOnline` is `false`
+(going online cannot help), so check `deviceNotBound` before un-greying a card.
 
 **Read this limit before you word your UI.** It fires from the two moments the SDK is actually
 running: a payment using a key, and a refresh delivering new ones. Payment keys *also* expire by
@@ -2331,6 +2330,7 @@ with the reason, and is always safe to retry as is.
 | `transactions(...)` | `[TransactionSummary]` | `authorizationStatus`, `responseCode`, `responseStatusReason` |
 | `wallet.refreshTransactionStatus(transactionHash:)` / `refreshCreditConfirmation(transactionHash:)` | `VeyraLookup<TransactionSummary>` | the row, or `failureReason` |
 | `wallet.observeTransactionResolved { }` | `WalletTransactionResolution` | `status`, `responseCode`, `reason` |
+| `wallet.observeCardKeyStateChanged { }` | `CardKeyStateEvent` | `tokenUniqueReference`, `requiresOnline`, `deviceNotBound` |
 | `wallet.digitise(...)` / `verifyAccount(...)` | `DigitiseResult` / `VerifyAccountResponse` | `responseCode` (the issuer's decision — see [Table C](#table-c--veyra-token-service-wallet)), `responseStatus`, `responseStatusReason`, `message`. Never `PENDING` |
 | `wallet.requestActivationCode(...)` / `activate(...)` | `ActivationCodeResponse` / `ActivateResponse` | `responseStatus`, `responseStatusReason` (on `FAILED`, the failure code), plus `status` (`"SUCCESS"` / `"FAILURE"`) and the typed `failureCode` — see [Activation](#activation--failurecode) |
 | `wallet.deactivateToken(_:)` | `TokenStatusUpdateResponse` | `responseStatus`, `responseStatusReason`, `message`, `status`; only `APPROVED` removes the card |
@@ -3178,7 +3178,7 @@ behaves differently; only the calls change.
 | `tokenisation.recentActivity(tokenUniqueReference:)`, `TokenActivity` | **Removed** — `transactions(tokenUniqueReference:limit:)` has every rail |
 | `tokenisation.receipt(forTransactionHash:)` | `receiptForTransaction(_:)` |
 | `tokenisation.observeTokenLifecycle(onTokenStatusChanged:)` / `stopObservingTokenLifecycle()` | `observeTokenStatusChanged(onTokenStatusChanged:)` / `stopObservingTokenStatusChanged()` |
-| `tokenisation.observeCardKeyState(onKeyStateChanged:onDeviceNotBound:)` / `stopObservingCardKeyState()` | `observeCardKeyStateChanged(onKeyStateChanged:onDeviceNotBound:)` / `stopObservingCardKeyStateChanged()` |
+| `tokenisation.observeCardKeyState(onKeyStateChanged:onDeviceNotBound:)` / `stopObservingCardKeyState()` | `observeCardKeyStateChanged(_ listener:)` — one listener receiving a `CardKeyStateEvent` (`tokenUniqueReference`, `requiresOnline`, `deviceNotBound`) / `stopObservingCardKeyStateChanged()` |
 | `observePaymentRefusals(…, onAmountExceedsCardLimit:, …)` | `observePaymentRefusals(…, onAmountExceedCardLimit:, …)` |
 | `tokenisation.topUpKeysIfNeeded()` | **Removed** — the SDK tops payment keys up itself (at `configure`, when the app becomes active, every 15 minutes and before each payment). Delete the call |
 

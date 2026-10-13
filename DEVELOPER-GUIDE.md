@@ -150,7 +150,7 @@ let wallet = VeyraWallet.shared
 | `shared` | The singleton. |
 | *wallet operations* | Every wallet operation is a method on `VeyraWallet.shared` — bank lookup, eligibility, digitise, activation, tokens, payments, history, receipts, observers — plus `cancelDigitise(clientRequestID:)` and `cancelPayment(merchantOrderID:)` (scan to pay), which cancel a call while it is still on the phone (see [Cancelling a call](#cancelling-a-call)). The guide's examples hold it as `let wallet = VeyraWallet.shared`. The same operations, on the same owner, as Android's `VeyraWalletSdk` and React Native's `wallet`; Swift drops the `get` prefix (`tokens()` where the others say `getTokens()`). |
 | `transactions(tokenUniqueReference:limit:)` | The card's transaction history, most recent first (`limit` default 50). Local read. See [`transactions`](#transactions). |
-| `openPaySession()` / `closePaySession()` / `isPaySessionOpen` | The tap-to-pay pay session — the same three calls as Android and React Native, so one integration runs everywhere. iPhone cannot pay by tap, so `openPaySession()` always answers `PaySessionResult` `FAILED` / `NFC_UNAVAILABLE` (the same answer an Android phone without NFC gives — offer QR), `closePaySession()` does nothing, and `isPaySessionOpen` is `false`. |
+| `openPaySession()` / `closePaySession()` / `isPaySessionOpen()` | The tap-to-pay pay session — the same three calls as Android and React Native, so one integration runs everywhere. iPhone cannot pay by tap, so `openPaySession()` always answers `PaySessionResult` `FAILED` / `NFC_UNAVAILABLE` (the same answer an Android phone without NFC gives — offer QR), `closePaySession()` does nothing, and `isPaySessionOpen()` returns `false`. |
 | `paymentApplicationInstanceID()` | This install's SDK-generated `payment_application_instance_id` (`VYRA` + 32 hex chars): minted on first use, persisted install-scoped (never backed up), new on reinstall. Read-only. |
 
 ---
@@ -1377,7 +1377,7 @@ if !selection.selected {                          // FAILED / CARD_NOT_FOUND
 fact as `responseStatus == "APPROVED"`). The result is `@discardableResult`.
 
 **Tap-to-pay is Android-only** — on iOS the wallet pays by QR (Apple restricts card emulation). The
-pay-session calls (`openPaySession()`, `closePaySession()`, `isPaySessionOpen`) still exist with the
+pay-session calls (`openPaySession()`, `closePaySession()`, `isPaySessionOpen()`) still exist with the
 same names as on Android, so shared code needs no platform check: opening answers `FAILED` /
 `NFC_UNAVAILABLE`, which you handle as on an Android phone without NFC — show the QR rails.
 
@@ -3076,6 +3076,7 @@ behaves differently; only the calls change.
 | `tokenisation.verifyAccount(accountNumber:institutionCode:walletAccountID:accountHolderName:accountNumberSource:)` | `verifyAccount(VerifyAccountParams(...))` — `accountHolderName` is now optional |
 | `tokenisation.digitise(accountNumber:…clientRequestID:)` | `digitise(DigitiseParams(...))` |
 | `tokenisation.activeToken` (property) | `activeToken()` |
+| `VeyraWallet.shared.isPaySessionOpen` (property) | `isPaySessionOpen()` |
 | — | `token(_:)`, `hasActivationObserver(tokenUniqueReference:)` (new) |
 | `tokenisation.lukState(tokenUniqueReference:)`, `LukState` | **Removed** — use the token's `requiresOnline` (from `tokens()` / `token(_:)`) and `observeCardKeyStateChanged` |
 | `requestActivationCode(tokenUniqueReference:method:reason:)`, `ActivationMethod` | `requestActivationCode(tokenUniqueReference:medium:reason:)`, `ActivationMedium` |

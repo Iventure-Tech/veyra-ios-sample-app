@@ -23,7 +23,6 @@ struct PayView: View {
     @State private var pendingRemoval: StoredCard?
     @State private var working = false
     /// Payment-keys state for the focused card.
-    @State private var lukState: LukState?
 
     /// A payment refused before anything was sent — shown to the payer, and kept apart from
     /// `actionError` because it is not an error in the call the user just made.
@@ -211,20 +210,6 @@ struct PayView: View {
 
     private func cardActions(_ card: StoredCard) -> some View {
         VStack(spacing: 10) {
-            // Payment-keys indicator: remaining Limited-Use Keys. Refresh is fully
-            // SDK-automatic (pre-payment top-up, scene-active, requires-online trigger) — no
-            // manual refresh action is exposed.
-            HStack(spacing: 8) {
-                Image(systemName: "key.fill").font(.footnote).foregroundStyle(.secondary)
-                if let lukState {
-                    Text("\(lukState.usableKeyCount) payment key\(lukState.usableKeyCount == 1 ? "" : "s") left")
-                        .font(.footnote)
-                        .foregroundStyle(lukState.refreshDue ? Brand.crimson : .secondary)
-                } else {
-                    Text("Checking keys…").font(.footnote).foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
             // Transaction history + receipts for this token.
             NavigationLink {
                 TransactionsView(tokenUniqueReference: card.tokenUniqueReference, cardName: card.bankName ?? "Card")
@@ -262,7 +247,6 @@ struct PayView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.bar)
-        .task(id: card.id) { await loadLukState(card.tokenUniqueReference) }
     }
 
     private func setActive(_ tokenUniqueReference: String) async {
@@ -333,11 +317,6 @@ struct PayView: View {
         } catch {
             actionError = String(describing: error)
         }
-    }
-
-    private func loadLukState(_ tokenUniqueReference: String) async {
-        lukState = nil
-        lukState = try? await VeyraWallet.shared.lukState(tokenUniqueReference: tokenUniqueReference)
     }
 
     /// Remove (the visible CTA): backend deactivate, then the on-device wipe. If the backend call

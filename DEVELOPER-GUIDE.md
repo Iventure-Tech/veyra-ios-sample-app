@@ -1291,7 +1291,6 @@ The wallet's cards, from the SDK's local registry — no network call.
 let cards = try await wallet.tokens()                       // [StoredCard]
 let active = try await wallet.activeToken()                 // StoredCard? — the one payments use
 let card = try await wallet.token(tokenUniqueReference)     // StoredCard? — nil when not in this wallet
-let usable = try await wallet.hasProvisioningData(tokenUniqueReference)   // false when not on this device
 ```
 
 `StoredCard`: `tokenUniqueReference`, `panLastFour`, `maskedPAN`, `expiry` (`MM/YY`), `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `accountHolderName`, `bankName`, `status`, `requiresActivation`, `isActive`, `requiresOnline`, `deviceNotBound`.
@@ -1741,7 +1740,7 @@ let receipts = try await wallet.receipts(limit: 100)
 let linked   = try await wallet.receiptForTransaction(hash)
 ```
 
-#### Wallet maintenance — automatic; `lukState`
+#### Wallet maintenance — automatic
 
 The SDK maintains its own cards — no app wiring required. At `configure`, whenever the app becomes active, and every 15 minutes while the app runs, it syncs each stored card's server status (a suspended card becomes non-payable until polled active again; a deactivated one is removed), self-heals cards the server marks as needing refresh, and tops up the active card's payment keys if they are running low (the key check also runs automatically before every payment). iOS suspends timers while the app is suspended, so nothing runs in the background — the next foreground or launch catches everything up.
 
@@ -1751,7 +1750,7 @@ There is nothing to call for any of it. What your app may still do on foreground
 Task { _ = try? await wallet.reconcilePendingTransactions() }
 ```
 
-`lukState(tokenUniqueReference:)` returns `LukState(usableKeyCount, refreshDue)` for an optional "keys remaining" indicator. There is deliberately no manual refresh call — the SDK owns when keys refresh; your app only observes (`lukState`, `requiresOnline`, `deviceNotBound`).
+There is deliberately no manual refresh call and no key count to read — the SDK owns the payment keys. What your app shows is whether a card can pay: `StoredCard.requiresOnline` and `deviceNotBound` from `tokens()`, kept current by [`observeCardKeyStateChanged`](#observecardkeystatechanged--a-card-ran-out-of-payment-keys-or-got-them-back).
 
 ---
 
@@ -2841,7 +2840,6 @@ public struct PaymentQr {
     let expiresAtEpochMillis: Int64
     let transactionHash: String?            // match against history to reconcile exactly this QR
 }
-public struct LukState { let usableKeyCount: Int; let refreshDue: Bool }
 
 public struct TransactionSummary {          // wallet history row
     let merchantName: String; let amountInMinorUnit: Int64  // Int64 since 1.0.15; was Int
@@ -3078,7 +3076,8 @@ behaves differently; only the calls change.
 | `tokenisation.verifyAccount(accountNumber:institutionCode:walletAccountID:accountHolderName:accountNumberSource:)` | `verifyAccount(VerifyAccountParams(...))` — `accountHolderName` is now optional |
 | `tokenisation.digitise(accountNumber:…clientRequestID:)` | `digitise(DigitiseParams(...))` |
 | `tokenisation.activeToken` (property) | `activeToken()` |
-| — | `token(_:)`, `hasProvisioningData(_:)`, `hasActivationObserver(tokenUniqueReference:)` (new) |
+| — | `token(_:)`, `hasActivationObserver(tokenUniqueReference:)` (new) |
+| `tokenisation.lukState(tokenUniqueReference:)`, `LukState` | **Removed** — use the token's `requiresOnline` (from `tokens()` / `token(_:)`) and `observeCardKeyStateChanged` |
 | `requestActivationCode(tokenUniqueReference:method:reason:)`, `ActivationMethod` | `requestActivationCode(tokenUniqueReference:medium:reason:)`, `ActivationMedium` |
 | `VeyraWallet.shared.getTransactions(tokenUniqueReference:limit:)` | `transactions(tokenUniqueReference:limit:)` |
 | `tokenisation.transactionHistory(tokenUniqueReference:limit:)` (deprecated) | **Removed** — `transactions(tokenUniqueReference:limit:)` (default `limit` 50, not 100) |

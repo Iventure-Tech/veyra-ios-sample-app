@@ -656,6 +656,16 @@ Returns `MerchantStatus` — the same outcome as `status`/`activate`/`deactivate
 
 Arm the reader for one sale and wait for the customer's tap. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only real outcomes (approved / declined / failed / pending / retry / not sent) end the payment.
 
+**The screen stays awake while a payment is live.** From the moment a tap payment starts until its
+result arrives, or the reader ends without a card, the SDK keeps the iPhone from auto-locking. A screen
+that locks ends the card-reading session. It does this with the app's idle timer
+(`UIApplication.isIdleTimerDisabled`), and shares it carefully:
+- It switches the idle timer off only if it was on, and turns it back on only if it was the one that
+  switched it off. An app that keeps its own screen on is left alone.
+- Overlapping taps never release each other's hold.
+- If your app manages the idle timer itself, set it before starting a tap. A change your app makes
+  during a tap can't be told apart from the SDK's own.
+
 ```swift
 let session = VeyraSoftPOS.shared.tap.session(
     amountMinorUnits: 32500,

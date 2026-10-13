@@ -97,7 +97,7 @@ struct MerchantTransactionsView: View {
         lookingUp = true
         defer { lookingUp = false }
         do {
-            let lookup = try await VeyraSoftPOS.shared.transactions.paymentStatus(merchantOrderID: orderID)
+            let lookup = try await VeyraSoftPOS.shared.paymentStatus(merchantOrderID: orderID)
             var text: String
             if let order = lookup.value {
                 switch order.responseStatus {
@@ -251,7 +251,7 @@ struct MerchantTransactionsView: View {
 
     private func load() async {
         do {
-            transactions = try await VeyraSoftPOS.shared.transactions.history(limit: 50)
+            transactions = try await VeyraSoftPOS.shared.getTransactions(limit: 50)
         } catch {
             loadError = "Couldn't load transactions"
         }
@@ -274,8 +274,8 @@ struct MerchantTransactionsView: View {
         defer { checkingStatus = nil }
         do {
             // A check that could not be made is not thrown: it says why, and the row is unchanged.
-            let lookup = try await VeyraSoftPOS.shared.transactions
-                .refreshStatus(reference: reference)
+            let lookup = try await VeyraSoftPOS.shared
+                .refreshTransactionStatus(merchantTransactionReference: reference)
             if let reason = lookup.failureReason {
                 statusCheckNotes[reference] = reason == "NO_NETWORK_CONNECTION"
                     ? "No internet connection — connect and try again."
@@ -311,8 +311,8 @@ struct MerchantTransactionsView: View {
         creditCheckNotes[reference] = nil
         defer { checkingCredit = nil }
         do {
-            let lookup = try await VeyraSoftPOS.shared.transactions
-                .refreshCreditConfirmation(reference: reference)
+            let lookup = try await VeyraSoftPOS.shared
+                .refreshCreditConfirmation(merchantTransactionReference: reference)
             if let reason = lookup.failureReason {
                 creditCheckNotes[reference] = reason == "NO_NETWORK_CONNECTION"
                     ? "No internet connection — connect and try again."
@@ -333,7 +333,7 @@ struct MerchantTransactionsView: View {
 
     private func loadReceipt(_ reference: String) async {
         // Distinguish "load failed / no receipt" (alert) from success (sheet).
-        if let loaded = try? await VeyraSoftPOS.shared.transactions.receipt(forReference: reference) {
+        if let loaded = try? await VeyraSoftPOS.shared.getReceipt(merchantTransactionReference: reference) {
             receipt = loaded
         } else {
             receiptError = true

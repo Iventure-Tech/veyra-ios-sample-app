@@ -40,10 +40,10 @@ struct MerchantSettingsView: View {
 
     /// Prefill at **init** (before first render), not in `onAppear`: values set in `onAppear`
     /// don't reflect in a `TextField` until the field re-renders (which is why they only
-    /// appeared after focusing each one). `merchant.stored` is synchronous, so the whole form
+    /// appeared after focusing each one). `getStored()` is synchronous, so the whole form
     /// can be seeded here and shows populated on load.
     init() {
-        let storedMerchant = VeyraSoftPOS.shared.merchant.stored
+        let storedMerchant = VeyraSoftPOS.shared.getStored()
         _stored = State(initialValue: storedMerchant)
 
         let s = SampleData.personal // registration defaults (isBusiness starts false)
@@ -76,7 +76,7 @@ struct MerchantSettingsView: View {
     /// Refresh after register / clear (user-driven, so re-render already happens): re-read the
     /// stored merchant and re-seed the fields.
     private func load() {
-        stored = VeyraSoftPOS.shared.merchant.stored
+        stored = VeyraSoftPOS.shared.getStored()
         if let merchant = stored {
             merchantName = merchant.merchantName
             email = merchant.emailAddress
@@ -107,7 +107,7 @@ struct MerchantSettingsView: View {
 
     private func loadBanks() async {
         do {
-            let list = try await VeyraSoftPOS.shared.merchant.banks()
+            let list = try await VeyraSoftPOS.shared.getSettlementBanks()
             banks = list.banks
             // An empty bank picker on an offline device must say why — reconnecting is the only
             // thing that fixes it, and the merchant cannot guess that.
@@ -223,7 +223,7 @@ struct MerchantSettingsView: View {
             // country code is zero-padded to 4 digits, BVN rides personal-only, CAC business-only.
             let paddedCountry = String(repeating: "0", count: max(0, 4 - countryCode.trimmingCharacters(in: .whitespaces).count))
                 + countryCode.trimmingCharacters(in: .whitespaces)
-            let result = try await VeyraSoftPOS.shared.merchant.register(
+            let result = try await VeyraSoftPOS.shared.register(
                 MerchantRegistration(
                     merchantType: isBusiness ? .business : .personal,
                     merchantName: merchantName.trimmingCharacters(in: .whitespaces),
@@ -268,8 +268,7 @@ struct MerchantSettingsView: View {
         resultText = nil
         errorText = nil
         do {
-            let status = try await VeyraSoftPOS.shared.merchant.update(
-                merchantID: merchant.merchantID,
+            let status = try await VeyraSoftPOS.shared.update(
                 MerchantUpdate(
                     merchantName: merchantName.trimmingCharacters(in: .whitespaces),
                     emailAddress: email.trimmingCharacters(in: .whitespaces),

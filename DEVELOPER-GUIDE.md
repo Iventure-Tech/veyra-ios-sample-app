@@ -915,7 +915,7 @@ The receipt returns the payload string (`qrPayload`) for you to render, and carr
 
 #### `softpos.getTransactionStatus`
 
-Backend status query by reference: `transactionStatus(merchantTransactionReference:transactionDate:)` (date `YYYY-MM-DD`) for the stored merchant → `VeyraLookup<[TransactionStatus]>`: `value` is the gateway's rows (`responseCode`, `amount`, `transactionID`, `merchantStatus`, `creditTransactionID`, `isCreditConfirmationSupported`), or `nil` with a `failureReason` when the query could not be made. It writes nothing. Use the local history for everyday listing; this is for reconciliation against the backend.
+Backend status query by reference: `transactionStatus(merchantTransactionReference:transactionDate:)` (date `YYYY-MM-DD`) for the stored merchant → `VeyraLookup<[TransactionStatus]>`: `value` is the gateway's rows (`responseStatus` + `responseStatusReason` — branch on these —, `responseCode`, `amount`, `transactionID`, `merchantStatus`, `creditTransactionID`, `isCreditConfirmationSupported`), or `nil` with a `failureReason` when the query could not be made. It writes nothing. Use the local history for everyday listing; this is for reconciliation against the backend.
 
 #### `softpos.getCreditConfirmation`
 

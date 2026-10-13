@@ -52,21 +52,23 @@ enum SampleConfig {
     private static func configureCombined() throws {
         try VeyraSDK.configure(
             customerID: DemoSession.customerID,
-            provider: AppProvider.provider(),
-            softpos: .init(
-                environment: .test,
-                // The provider credential the gateway resolves the acquirer id and MCC from —
-                // the same identifier the wallet configuration carries.
-                paymentAppProviderID: paymentAppProviderID
+            config: VeyraSDKConfiguration(
+                softpos: .init(
+                    environment: .test,
+                    // The provider credential the gateway resolves the acquirer id and MCC from —
+                    // the same identifier the wallet configuration carries.
+                    paymentAppProviderID: paymentAppProviderID
+                ),
+                wallet: .init(
+                    environment: .test,
+                    paymentAppProviderID: paymentAppProviderID,
+                    tokenRequestorID: tokenRequestorID,
+                    appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID
+                    allowedAcquirerIDs: allowedAcquirerIDs,
+                    allowedMerchantIDs: allowedMerchantIDs
+                )
             ),
-            wallet: .init(
-                environment: .test,
-                paymentAppProviderID: paymentAppProviderID,
-                tokenRequestorID: tokenRequestorID,
-                appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID
-                allowedAcquirerIDs: allowedAcquirerIDs,
-                allowedMerchantIDs: allowedMerchantIDs
-            )
+            provider: AppProvider.provider()
         )
     }
 }
@@ -112,7 +114,7 @@ struct VeyraBankApp: App {
 struct HomeView: View {
     // Home is the inert screen: mode is NONE here (the SDK claims a mode only while a
     // payment is actually in flight, and drops back to inert by itself).
-    @State private var mode: VeyraMode = ((try? VeyraSDK.shared.currentMode) ?? .none)
+    @State private var mode: VeyraMode = ((try? VeyraSDK.shared.currentMode()) ?? .none)
     // Get paid is locked until a merchant is registered;
     // registration/edit/activate/deactivate live behind the settings gear.
     @State private var registered = false
@@ -222,7 +224,7 @@ struct HomeView: View {
     }
 
     private func refresh() {
-        mode = ((try? VeyraSDK.shared.currentMode) ?? .none)
+        mode = ((try? VeyraSDK.shared.currentMode()) ?? .none)
         signedIn = DemoSession.isSignedIn
         customerID = DemoSession.customerID
         registered = signedIn && VeyraSoftPOS.shared.merchant.isRegistered

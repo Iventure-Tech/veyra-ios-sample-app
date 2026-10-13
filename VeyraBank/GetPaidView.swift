@@ -133,7 +133,7 @@ struct GetPaidView: View {
         // Mode is SDK-managed: the tap session claims SOFTPOS when it starts and releases it
         // when it ends — no screen choreography needed here.
         .onAppear {
-            merchant = VeyraSoftPOS.shared.stored()
+            merchant = VeyraSoftPOS.shared.storedMerchantData()
         }
         .onDisappear {
             autoReturnTask?.cancel()
@@ -974,7 +974,7 @@ struct GetPaidView: View {
         guard !isActive, merchant != nil else { return }
         // The facade refreshes the stored merchant's status as part of the lookup.
         _ = try? await VeyraSoftPOS.shared.refreshStatus()
-        merchant = VeyraSoftPOS.shared.stored()
+        merchant = VeyraSoftPOS.shared.storedMerchantData()
     }
 }
 

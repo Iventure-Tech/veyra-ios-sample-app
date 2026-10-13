@@ -99,12 +99,11 @@ struct VeyraBankApp: App {
         .onChange(of: scenePhase) { phase in
             guard phase == .active else { return }
             Task {
-                // Scene-active LUK top-up: replenish the active card's payment keys
-                // whenever the app foregrounds, before any pay screen is reached.
-                try? await VeyraWallet.shared.tokenisation.topUpKeysIfNeeded()
+                // Payment keys need no call: the SDK tops them up itself whenever the app
+                // becomes active.
                 // Scene-active history reconcile: settle any PENDING rows — chiefly
                 // show-to-pay QRs, which are offline and only learn their outcome this way.
-                try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
+                try? await VeyraWallet.shared.reconcilePendingTransactions()
             }
         }
     }

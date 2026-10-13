@@ -271,7 +271,7 @@ struct PayView: View {
         working = true
         defer { working = false }
         do {
-            let selection = try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
+            let selection = try await VeyraWallet.shared.setActiveToken(tokenUniqueReference)
             // An answer: FAILED / CARD_NOT_FOUND when the card is no longer in this wallet.
             guard selection.selected else {
                 actionError = "This card can't be selected (\(selection.responseStatusReason ?? selection.responseStatus))."
@@ -289,7 +289,7 @@ struct PayView: View {
     /// active card moves the registration rather than accumulating listeners.
     ///
     /// The two causes stay apart on purpose, because the advice differs. Connecting fixes
-    /// `onRequireOnline`; it can never fix `onAmountExceedsCardLimit`, whose cap is provisioned
+    /// `onRequireOnline`; it can never fix `onAmountExceedCardLimit`, whose cap is provisioned
     /// with the card — so telling the payer to go online there would send them round a loop that
     /// cannot succeed.
     private func naira(_ minorUnits: Int64) -> String {
@@ -299,17 +299,17 @@ struct PayView: View {
     private func observeRefusals(for tokenUniqueReference: String) {
         guard observedRefusalsFor != tokenUniqueReference else { return }
         if let previous = observedRefusalsFor {
-            try? VeyraWallet.shared.tokenisation.stopObservingPaymentRefusals(
+            try? VeyraWallet.shared.stopObservingPaymentRefusals(
                 forTokenUniqueReference: previous
             )
         }
-        try? VeyraWallet.shared.tokenisation.observePaymentRefusals(
+        try? VeyraWallet.shared.observePaymentRefusals(
             forTokenUniqueReference: tokenUniqueReference,
             onRequireOnline: { _, amountMinorUnits, _ in
                 refusal = "Connect to the internet — this card needs to refresh before it can pay "
                     + naira(amountMinorUnits) + "."
             },
-            onAmountExceedsCardLimit: { _, _, cardLimitMinorUnits, _ in
+            onAmountExceedCardLimit: { _, _, cardLimitMinorUnits, _ in
                 refusal = cardLimitMinorUnits.map {
                     "This card can pay at most " + naira($0)
                         + " in one payment — try a smaller amount, or another card."
@@ -323,7 +323,7 @@ struct PayView: View {
     private func deactivate(_ tokenUniqueReference: String) async {
         actionError = nil
         do {
-            let removal = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
+            let removal = try await VeyraWallet.shared.deactivateToken(tokenUniqueReference)
             // Only APPROVED removed the card; anything else leaves it in the wallet, so say why.
             guard removal.responseStatus == VeyraResponseStatus.approved else {
                 actionError = removalError(removal)
@@ -337,7 +337,7 @@ struct PayView: View {
 
     private func loadLukState(_ tokenUniqueReference: String) async {
         lukState = nil
-        lukState = try? await VeyraWallet.shared.tokenisation.lukState(tokenUniqueReference: tokenUniqueReference)
+        lukState = try? await VeyraWallet.shared.lukState(tokenUniqueReference: tokenUniqueReference)
     }
 
     /// Remove (the visible CTA): backend deactivate, then the on-device wipe. If the backend call
@@ -349,7 +349,7 @@ struct PayView: View {
         working = true
         defer { working = false }
         do {
-            let removal = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
+            let removal = try await VeyraWallet.shared.deactivateToken(tokenUniqueReference)
             guard removal.responseStatus == VeyraResponseStatus.approved else {
                 actionError = removalError(removal)
                 return
@@ -405,20 +405,20 @@ struct PayView: View {
     /// Callbacks arrive on the main thread, so touching state here is safe. Registration is
     /// single-listener ("last registration wins"), so appearing twice replaces rather than stacks.
     private func observeCardState() {
-        try? VeyraWallet.shared.tokenisation.observeTokenLifecycle { _ in
+        try? VeyraWallet.shared.observeTokenStatusChanged { _ in
             // Re-read rather than patching the row from the payload: the store is the source of
             // truth and one card changing can change the list (a DEACTIVATED card leaves it).
             Task { await reload() }
         }
         // Keys ran out, or a refresh replenished them — `requiresOnline` drives `activeCardBlocked`.
-        try? VeyraWallet.shared.tokenisation.observeCardKeyState { _, _ in
+        try? VeyraWallet.shared.observeCardKeyStateChanged { _, _ in
             Task { await reload() }
         }
     }
 
     private func reload() async {
         do {
-            let cards = try await VeyraWallet.shared.tokenisation.tokens()
+            let cards = try await VeyraWallet.shared.tokens()
             withAnimation { state = .loaded(cards) }
             if let selectedID, !cards.contains(where: { $0.id == selectedID }) {
                 self.selectedID = nil

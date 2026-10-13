@@ -252,7 +252,7 @@ struct TransactionDetailView: View {
     private func loadLinkedReceipt() async {
         guard let hash = tx.transactionHash else { return }
         do {
-            linkedReceipt = try await VeyraWallet.shared.tokenisation.receipt(forTransactionHash: hash)
+            linkedReceipt = try await VeyraWallet.shared.receiptForTransaction(hash)
         } catch {
             // A load failure is not "no receipt" — surface it rather than showing a dead screen.
             scanError = "Could not load the linked receipt: \(error.localizedDescription)"
@@ -267,7 +267,7 @@ struct TransactionDetailView: View {
         do {
             // This scan was launched FROM this transaction — the SDK rejects a receipt
             // belonging to any other transaction instead of silently linking it elsewhere.
-            let scan = try await VeyraWallet.shared.tokenisation.processReceipt(
+            let scan = try await VeyraWallet.shared.processReceipt(
                 base64, expectedTransactionHash: tx.transactionHash)
             // An answer: APPROVED with the stored receipt, or FAILED with the reason.
             guard let receipt = scan.receipt, scan.stored else {
@@ -293,7 +293,7 @@ struct TransactionDetailView: View {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             if Task.isCancelled { return }
             let rows = (try? await VeyraWallet.shared
-                .getTransactions(tokenUniqueReference: tokenUniqueReference, limit: 50)) ?? []
+                .transactions(tokenUniqueReference: tokenUniqueReference, limit: 50)) ?? []
             if let fresh = rows.first(where: { $0.transactionHash == hash }) { live = fresh }
         }
     }
@@ -318,7 +318,7 @@ struct TransactionDetailView: View {
         defer { checkingStatus = false }
         do {
             // A check that could not be made is not thrown: it says why, and the row is unchanged.
-            let lookup = try await VeyraWallet.shared.tokenisation
+            let lookup = try await VeyraWallet.shared
                 .refreshTransactionStatus(transactionHash: hash)
             if let reason = lookup.failureReason {
                 statusCheckNote = reason == "NO_NETWORK_CONNECTION"
@@ -359,7 +359,7 @@ struct TransactionDetailView: View {
         creditCheckNote = nil
         defer { checkingCredit = false }
         do {
-            let lookup = try await VeyraWallet.shared.tokenisation
+            let lookup = try await VeyraWallet.shared
                 .refreshCreditConfirmation(transactionHash: hash)
             if let reason = lookup.failureReason {
                 creditCheckNote = reason == "NO_NETWORK_CONNECTION"

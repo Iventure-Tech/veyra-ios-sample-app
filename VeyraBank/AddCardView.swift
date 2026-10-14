@@ -267,9 +267,25 @@ struct AddCardView: View {
             let reason = r.responseStatusReason.map { " (\($0))" } ?? ""
             digitiseResult = "\(r.responseStatus ?? "unknown")\(reason) · \(r.responseCode ?? "-")\(tur)\(stored)"
             digitiseSucceeded = r.tokenStored
+            // Sent, but no usable answer: the server may have created a card this phone never
+            // received. Switch it off by this attempt's ID; the next "Add" is a new attempt.
+            if Self.shouldDeactivateLostDigitise(r), let lostID = r.clientRequestID {
+                let cleanup = try await VeyraWallet.shared.deactivateDigitise(clientRequestID: lostID)
+                let answer = [cleanup.responseStatus, cleanup.responseStatusReason].compactMap { $0 }.joined(separator: " / ")
+                digitiseResult = (digitiseResult ?? "") + "\nAny card this attempt created was switched off: \(answer)"
+            }
         } catch {
             digitiseError = String(describing: error)
         }
+    }
+
+    /// Only a digitise that was sent and got no usable answer (`FAILED` with `NO_RESPONSE_RECEIVED` or
+    /// `UPSTREAM_ERROR`) may have left a card on the server that this phone never received. Anything
+    /// else created nothing or delivered its card, so there is nothing to switch off.
+    static func shouldDeactivateLostDigitise(_ r: DigitiseResult) -> Bool {
+        r.responseStatus == ResponseStatus.failed &&
+            ["NO_RESPONSE_RECEIVED", "UPSTREAM_ERROR"].contains(r.responseStatusReason ?? "") &&
+            !(r.clientRequestID ?? "").isEmpty
     }
 
     /// Cancel names this attempt's clientRequestID. The cancel answers at once; the digitise

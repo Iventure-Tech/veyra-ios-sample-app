@@ -58,6 +58,9 @@ enum SampleConfig {
                     // The provider credential the gateway resolves the acquirer id and MCC from —
                     // the same identifier the wallet configuration carries.
                     paymentAppProviderID: paymentAppProviderID
+                    // Optional, last argument: `requestTimeoutSeconds: 30` — the longest the SDK
+                    // waits for one backend call, 5–60 s. Unset keeps the SDK's own timeouts; a
+                    // payment that runs out of time ends pending, not failed.
                 ),
                 wallet: .init(
                     environment: .test,
@@ -66,6 +69,7 @@ enum SampleConfig {
                     appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID
                     allowedAcquirerIDs: allowedAcquirerIDs,
                     allowedMerchantIDs: allowedMerchantIDs
+                    // Optional, last argument: `requestTimeoutSeconds: 30` (5–60 s), as above.
                 )
             ),
             provider: AppProvider.provider()

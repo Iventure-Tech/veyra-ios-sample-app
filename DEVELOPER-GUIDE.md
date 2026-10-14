@@ -454,6 +454,7 @@ let softposConfig = VeyraSoftPOSConfiguration(
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults — no URLs to supply. |
 | `paymentAppProviderID` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet configuration's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. |
+| `requestTimeoutSeconds` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
 
 ### `VeyraWalletConfiguration`
 
@@ -479,8 +480,36 @@ let walletConfig = VeyraWalletConfiguration(
 | `appleTeamID` | **Mandatory** | Your app's Apple Developer Team ID (e.g. `"ABCDE12345"`). Together with the bundle ID (always detected from `Bundle.main` — there is no parameter for it) it forms the App Attest app ID (`teamID.bundleID`) that device attestation binds to and the backend verifies — it attests **your** app, so this is your team, not Veyra's. Digitise fails fast if missing. |
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
+| `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
 
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
+
+### Request timeout
+
+Both configurations take an optional `requestTimeoutSeconds`: the longest the SDK waits for one
+call to the Veyra backend, start to finish (connecting, sending and waiting for the answer).
+Each SDK uses its own value, so a combined app can give SoftPOS and the wallet different
+timeouts.
+
+```swift
+let softposConfig = VeyraSoftPOSConfiguration(
+    environment: .test, paymentAppProviderID: providerID, requestTimeoutSeconds: 20)
+let walletConfig = VeyraWalletConfiguration(
+    environment: .test, paymentAppProviderID: providerID, tokenRequestorID: requestorID,
+    appleTeamID: "YOURTEAMID1", requestTimeoutSeconds: 30)
+```
+
+- **Allowed values: 5 to 60.** Anything else makes `configure` throw `invalidConfiguration`,
+  naming the value and the range. The SDK never adjusts the value.
+- **Not set:** the SDK keeps its own timeout of 60 s per call.
+- **It applies to every backend call the SDK makes,** including the token request and calls
+  through a `VeyraProxyProvider` (your backend's relay is given the same time limit). It does not
+  change the NFC scan timeouts or the card-activation wait.
+- **A payment that runs out of time is pending, not failed.** The request may already have
+  reached the server, so the payment ends `PENDING` (`68` / `NO_RESPONSE_RECEIVED`) and the SDK
+  checks the result later. A shorter timeout gives the user an answer sooner, but more payments
+  will be pending rather than final. A longer one gets more final answers on a slow network,
+  but the user waits longer.
 
 ### `VeyraEnvironment`
 
@@ -1223,6 +1252,7 @@ Everything hangs off `VeyraWallet.shared` — the examples below hold it as `let
 | `verifyAccount(_:)` | Checks the account can be tokenised (`VerifyAccountParams`) | `VerifyAccountResponse` |
 | `digitise(_:)` | Adds the token: tokenises the account and stores the payment material on the phone (`DigitiseParams`) | `DigitiseResult` |
 | `cancelDigitise(clientRequestID:)` | Cancels an add-token still on the phone | `CancelResult` |
+| `deactivateDigitise(clientRequestID:)` | Switches off, on the server, the card a `digitise` created when its answer never reached the phone | `TokenStatusUpdateResponse` |
 
 Flow: `banks` → `verifyAccount` → `digitise`. On success the SDK receives, decrypts and stores the payment material on-device — the card can pay immediately (`APPROVED`) or after activation (`APPROVE_REQUIRE_AUTH`).
 
@@ -1314,11 +1344,42 @@ default:                                         // FAILED, or a status newer th
 
 `DigitiseParams` carries the same fields, and the same required ones, as Android's and React Native's: `accountNumber`, `institutionCode`, `accountHolderName`, `walletAccountID`, `emailAddress` and `recommendation` are required; everything else is optional. `accountNumberSource` takes the same `AccountNumberSource` values as on `VerifyAccountParams`.
 
-`DigitiseResult`: `tokenUniqueReference`, `responseCode` (the issuer's decision: `APPROVED`, `APPROVE_REQUIRE_AUTH`, `DECLINED`), `responseStatus` (always set: `APPROVED` · `DECLINED` · `FAILED` · `NOT_SENT` — **never `PENDING`**), `responseStatusReason` (the cause — present on `APPROVE_REQUIRE_AUTH` too, where it says why step-up is needed), `message`, `activationMethods` (`[ActivationMethodInfo]`: `medium` + masked `contact`), `tokenStored` (provisioning material decrypted and stored), `isApproved` (`responseStatus == "APPROVED"` — read from the status, never the code), `requiresActivation`. Add-card has no reference of its own: after `FAILED` or `NOT_SENT` simply digitise again. `clientRequestID` (optional) is your reference for one attempt: pass one and `cancelDigitise(clientRequestID:)` can cancel the add-card while it is still on the phone ([Cancelling a call](#cancelling-a-call)); a cancelled attempt ends `NOT_SENT` / `CANCELLED`.
+`DigitiseResult`: `tokenUniqueReference`, `responseCode` (the issuer's decision: `APPROVED`, `APPROVE_REQUIRE_AUTH`, `DECLINED`), `responseStatus` (always set: `APPROVED` · `DECLINED` · `FAILED` · `NOT_SENT` — **never `PENDING`**), `responseStatusReason` (the cause — present on `APPROVE_REQUIRE_AUTH` too, where it says why step-up is needed), `message`, `activationMethods` (`[ActivationMethodInfo]`: `medium` + masked `contact`), `tokenStored` (provisioning material decrypted and stored), `clientRequestID` (the ID this attempt was sent with — yours, or the one the SDK generated; see [`deactivateDigitise`](#deactivatedigitise)), `isApproved` (`responseStatus == "APPROVED"` — read from the status, never the code), `requiresActivation`. After `FAILED` or `NOT_SENT` digitise again with a new ID — after a lost answer, switch off any card it created first. `clientRequestID` (optional) is your reference for one attempt: pass one and `cancelDigitise(clientRequestID:)` can cancel the add-card while it is still on the phone ([Cancelling a call](#cancelling-a-call)); a cancelled attempt ends `NOT_SENT` / `CANCELLED`.
 
 #### `cancelDigitise`
 
 Set `clientRequestID` in `DigitiseParams`, then `cancelDigitise(clientRequestID:)` with the same value cancels the add-token while it is still on the phone. It answers at once with a `CancelResult` and never throws; a cancelled `digitise` ends `NOT_SENT` / `CANCELLED`. See [Cancelling a call](#cancelling-a-call).
+
+#### `deactivateDigitise`
+
+A `digitise` that was sent but got no usable answer ends `"FAILED"` with `NO_RESPONSE_RECEIVED` or
+`UPSTREAM_ERROR`. The Veyra token service may still have created the card, and its details never
+reached the phone, so it can never pay. Switch it off with the attempt's ID
+(`DigitiseResult.clientRequestID`), then let the customer add the card again — a new `digitise` with a
+new ID. Only the phone that sent the `digitise` can do this.
+
+```swift
+let result = try await wallet.digitise(params)
+if result.responseStatus == ResponseStatus.failed,
+   ["NO_RESPONSE_RECEIVED", "UPSTREAM_ERROR"].contains(result.responseStatusReason ?? ""),
+   let lostID = result.clientRequestID {
+    let cleanup = try await wallet.deactivateDigitise(clientRequestID: lostID)
+    // APPROVED: switched off. FAILED / NO_TOKEN_CREATED or DIGITISATION_NOT_FOUND: nothing to
+    // switch off. PENDING: no answer — call again.
+}
+```
+
+| `responseStatus` / `responseStatusReason` | Meaning | What to do |
+|---|---|---|
+| `APPROVED` | The card was switched off (or already was). `tokenUniqueReference` names it; if it is on this phone it is removed with its data. | Let the customer add the card again. |
+| `FAILED` / `NO_TOKEN_CREATED` | The add-card ended before a card was created. | Nothing to switch off. |
+| `FAILED` / `DIGITISATION_NOT_FOUND` | No finished add-card with that ID from this phone. One still running on the server is not found until it ends. | If the add-card had only just failed, call again after a minute. |
+| `FAILED` / `TOKEN_STATE_CONFLICT` | The card's status does not allow switching it off. | Contact support. |
+| `PENDING` | Sent, no usable answer. | Call again — a repeat is harmless. |
+| `FAILED` / `INVALID_REQUEST` | The ID was blank; nothing was sent. | Pass the ID from `DigitiseResult`. |
+
+Every `clientRequestID` is used once: a `digitise` that reuses one this app has already sent is refused
+with `"FAILED"` / `DUPLICATE_CLIENT_REQUEST_ID`. Leave it `nil` and the SDK generates a new one each time.
 
 ---
 
@@ -2203,7 +2264,7 @@ has a `code` string for logs and cross-platform handling.
 |---|---|---|---|
 | `.notConfigured` | `NOT_CONFIGURED` | Any call before `VeyraWallet.configure(customerID:config:provider:)` / `VeyraSoftPOS.configure(customerID:config:provider:)`. In a combined app, `VeyraError.notConfigured` is thrown by `VeyraSDK.shared.currentMode()`, `.wallet` and `.softpos` before `VeyraSDK.configure(customerID:config:provider:)` | Configure the SDK first, at app start. |
 | `.notSignedIn` | `NOT_SIGNED_IN` | Any call with no customer — after `signOut()`, before the next `configure` | Call `configure` with the customer before using the SDK. Don't call wallet or merchant APIs from screens reachable while signed out. |
-| `.invalidConfiguration(message:)` | `INVALID_CONFIGURATION` | Thrown by `configure`: a provider it can't use (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`); a provider of a different kind from an earlier `configure` in this process; a blank `customerID`. `VeyraSDK.configure` throws the member SDK's error. Thrown by the call that needs it: a missing required wallet setting (payment app provider ID, token requestor ID, Apple Team ID) on `verifyAccount` / `digitise`; and `tap.start(_:onEvent:)` when both SDKs are in one app without `VeyraSDK` | Fix the configuration. `message` names the exact problem. |
+| `.invalidConfiguration(message:)` | `INVALID_CONFIGURATION` | Thrown by `configure`: a provider it can't use (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`); a provider of a different kind from an earlier `configure` in this process; a blank `customerID`; a `requestTimeoutSeconds` outside 5–60. `VeyraSDK.configure` throws the member SDK's error. Thrown by the call that needs it: a missing required wallet setting (payment app provider ID, token requestor ID, Apple Team ID) on `verifyAccount` / `digitise`; and `tap.start(_:onEvent:)` when both SDKs are in one app without `VeyraSDK` | Fix the configuration. `message` names the exact problem. |
 | `.sessionRequired` | `SESSION_REQUIRED` | A payment call made without its screen session | Declared for parity with React Native, which raises it. On iOS the SDK follows the screen lifecycle itself, so you should never see it. |
 | `.unsupportedOnPlatform` | `UNSUPPORTED_ON_PLATFORM` | A method this platform can't perform | Declared for parity with Android and React Native. The iOS SDK exposes no wallet tap-to-pay method at all (iOS does not allow card emulation), so no current iOS call throws it — the wallet pays by QR. |
 
@@ -2599,7 +2660,13 @@ lookup itself fails, the `VeyraLookup` (or `ReconcileResult`) carries a `failure
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | The cause, when there is one (e.g. `ACCOUNT_NAME_MISMATCH`) | Added, but the customer must activate it (`requiresActivation`); run [activation](#activation) with the returned `activationMethods` |
 | Add card | `DECLINED` | `DECLINED` | The issuer's reason — see below | The issuer refused this account; show the reason. The flow ends |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | The token service could not complete it; start a new add-card |
-| Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer ([Table A](#table-a--outcomes-the-sdk-itself-produces)); start a new add-card |
+| Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer ([Table A](#table-a--outcomes-the-sdk-itself-produces)). The card may have been created without reaching the phone: switch it off with `deactivateDigitise(clientRequestID: result.clientRequestID!)`, then start a new add-card |
+| Add card | `FAILED` | — | `DUPLICATE_CLIENT_REQUEST_ID` | This `clientRequestId` was already used for an add card; nothing was created. Send a new one (or leave it unset so the SDK generates one) |
+| Switch off a lost add card (`deactivateDigitise(clientRequestID:)`) | `APPROVED` | — | — | The card the add card created was switched off (or already was); `tokenUniqueReference` names it. Let the customer add the card again |
+| Switch off a lost add card | `FAILED` | — | `NO_TOKEN_CREATED` | The add card ended before a card was created — nothing to switch off |
+| Switch off a lost add card | `FAILED` | — | `DIGITISATION_NOT_FOUND` | No finished add card with that id from this phone; one still running is not found until it ends — call again after a minute |
+| Switch off a lost add card | `FAILED` | — | `TOKEN_STATE_CONFLICT` | The card's status does not allow it to be switched off |
+| Switch off a lost add card | `PENDING` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | Sent, no usable answer — call again; a repeat is harmless |
 | Activation code request (`requestActivationCode`) | `FAILED` | — | The failure code, e.g. `TOKEN_NOT_FOUND`, `ACTIVATION_LOCKED`, `CODE_REQUEST_RATE_LIMITED`, `ACTIVATION_FAILED` (typed in `failureCode`) | Can't send a code now; locked or rate-limited → wait or contact the issuer |
 | Activation code verify (`activate`) | `FAILED` | — | The failure code, e.g. `CODE_INVALID`, `CODE_EXPIRED`, `MAX_ATTEMPTS_EXCEEDED`, `NO_PENDING_ACTIVATION`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `ACTIVATION_FAILED` (typed in `failureCode`) | Wrong or expired code → ask again (`attemptsRemaining` is included); max attempts or locked → remove the card and add it again |
 | Card status / removal (`tokenStatus`, `deactivateToken`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `TOKEN_STATE_CONFLICT`, `TOKEN_UNIQUE_REFERENCE_REQUIRED` | The card isn't known, or the change isn't allowed from its current state. A removal that is not `APPROVED` leaves the card on the device |

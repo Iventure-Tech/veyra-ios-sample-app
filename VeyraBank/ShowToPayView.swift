@@ -153,7 +153,7 @@ struct ShowToPayView: View {
             }
             // Showing a QR ends with an outcome: APPROVED (a QR was made) or NOT_SENT with the
             // reason no QR could be made. Nothing is sent either way.
-            guard qr.responseStatus == VeyraResponseStatus.approved, let payload = qr.payload else {
+            guard qr.responseStatus == ResponseStatus.approved, let payload = qr.payload else {
                 switch qr.responseStatusReason {
                 case "AUTH_CANCELLED":
                     // The customer dismissed the sheet — back to amount entry, no error banner.

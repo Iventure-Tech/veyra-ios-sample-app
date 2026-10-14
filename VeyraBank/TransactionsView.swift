@@ -75,7 +75,7 @@ struct TransactionsView: View {
     }
 
     private func amountText(_ tx: TransactionSummary) -> String {
-        let major = Double(tx.amountInMinorUnit) / 100.0
+        let major = Double(tx.amountMinorUnits) / 100.0
         return String(format: "%.2f", major)
     }
 

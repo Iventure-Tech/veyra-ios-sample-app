@@ -433,12 +433,12 @@ struct GetPaidView: View {
                 settleOrderID(responseStatus: context.responseStatus)
                 // Cancelled before it was sent: nothing was created — back to amount entry (the
                 // order ID is kept for the retry).
-                if context.responseStatus == VeyraResponseStatus.notSent && context.responseStatusReason == "CANCELLED" {
+                if context.responseStatus == ResponseStatus.notSent && context.responseStatusReason == "CANCELLED" {
                     page = .amountEntry
                     return
                 }
                 // Creating the QR ends with an outcome: render it only when it was made.
-                guard context.responseStatus == VeyraResponseStatus.approved,
+                guard context.responseStatus == ResponseStatus.approved,
                       let txRef = context.txRef, let payload = context.mpmPayload else {
                     switch context.responseStatusReason {
                     case "DUPLICATE_MERCHANT_ORDER_ID":
@@ -523,7 +523,7 @@ struct GetPaidView: View {
             case .result(let result):
                 // Map the kernel outcome to a merchant-facing result — never surface
                 // the raw server/kernel error string.
-                let outcome = TapOutcome(status: result.status, reason: result.responseStatusReason,
+                let outcome = TapOutcome(status: result.responseStatus, reason: result.responseStatusReason,
                                          originalStatus: result.originalPayment?.responseStatus)
                 Image(systemName: outcome.icon)
                     .font(.system(size: 64))
@@ -603,8 +603,8 @@ struct GetPaidView: View {
     /// After an outcome: an order can have several attempts, so keep the order ID for the retry unless
     /// the order is paid or may be — after NOT_SENT, RETRY, DECLINED or FAILED no money moved.
     private func settleOrderID(responseStatus: String?) {
-        let reusable = [VeyraResponseStatus.notSent, VeyraResponseStatus.retry,
-                        VeyraResponseStatus.declined, VeyraResponseStatus.failed]
+        let reusable = [ResponseStatus.notSent, ResponseStatus.retry,
+                        ResponseStatus.declined, ResponseStatus.failed]
         retryOrderID = responseStatus.map(reusable.contains) == true ? currentOrderID : nil
     }
 
@@ -651,18 +651,18 @@ struct GetPaidView: View {
                 settleOrderID(responseStatus: result.responseStatus)
                 // Cancelled before it was sent (Cancel / leaving): nothing was charged — back to
                 // amount entry; the order ID is kept for the retry.
-                if result.responseStatus == VeyraResponseStatus.notSent && result.responseStatusReason == "CANCELLED" {
+                if result.responseStatus == ResponseStatus.notSent && result.responseStatusReason == "CANCELLED" {
                     page = .amountEntry
                     return
                 }
-                lastPaymentReference = result.reference
+                lastPaymentReference = result.merchantTransactionReference
                 tapState = .result(result)
                 tapHint = nil
                 // An approved tap carries the credit facts, so it enters the same "confirming
                 // credit" wait as the QR rails. The watch renders the stored row and owns only
                 // this result's hold — the polling is the SDK's, app-scoped.
                 scheduleAutoReturn()
-                if result.status == "APPROVED", let reference = result.reference {
+                if result.responseStatus == "APPROVED", let reference = result.merchantTransactionReference {
                     watchCreditConfirmation(
                         reference: reference,
                         initialWaiting: result.isCreditConfirmationSupported == true
@@ -801,13 +801,13 @@ struct GetPaidView: View {
                 )
                 settleOrderID(responseStatus: outcome.responseStatus)
                 // Cancelled before it was sent: nothing was charged — back to amount entry.
-                if outcome.responseStatus == VeyraResponseStatus.notSent && outcome.responseStatusReason == "CANCELLED" {
+                if outcome.responseStatus == ResponseStatus.notSent && outcome.responseStatusReason == "CANCELLED" {
                     page = .amountEntry
                     return
                 }
                 // A delivered outcome (approved or declined) is recorded under the reference the
                 // SDK minted and the gateway echoed — never one the app made up.
-                lastPaymentReference = outcome.reference.isEmpty ? nil : outcome.reference
+                lastPaymentReference = outcome.merchantTransactionReference
                 let reason = outcome.responseStatusReason.map { " · \($0)" } ?? ""
                 page = .customerQrResult(
                     approved: outcome.approved,
@@ -823,7 +823,7 @@ struct GetPaidView: View {
                 scheduleAutoReturn()
                 if outcome.approved {
                     watchCreditConfirmation(
-                        reference: outcome.reference,
+                        reference: outcome.merchantTransactionReference ?? "",
                         initialWaiting: outcome.isCreditConfirmationSupported == true
                     )
                 }
@@ -856,7 +856,7 @@ struct GetPaidView: View {
         // and is what covers a screen opened after the fact. Registration is single-listener —
         // the next sale's watch replaces this one.
         try? VeyraSoftPOS.shared.observeCreditConfirmation { confirmation in
-            guard confirmation.reference == reference else { return }
+            guard confirmation.merchantTransactionReference == reference else { return }
             creditConfirmState = confirmation.status == "RECEIVED" ? .received : .unable
             scheduleAutoReturn()
         }
@@ -981,7 +981,7 @@ struct GetPaidView: View {
 /// What to tell the merchant when the order ID is already on another payment, from that payment's
 /// status. Never "try again": the order is paid, or a payment for it is still being confirmed.
 func duplicateOrderMessage(originalStatus: String?) -> String {
-    originalStatus == VeyraResponseStatus.pending
+    originalStatus == ResponseStatus.pending
         ? "A payment for this order is still being confirmed - do not take another payment"
         : "This order is already paid - do not take another payment"
 }

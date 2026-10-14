@@ -3145,7 +3145,7 @@ public struct CreditConfirmation { let creditTransactionID: String; let status: 
 public struct TransactionResolution { let reference: String; let responseCode: String?; let status: String; let reason: String? }   // observeTransactionResolved payload
 public struct SaleCreditConfirmation { let reference: String; let creditTransactionID: String?; let status: String; let amountMinorUnits: Int64?; let bankReference: String?; let creditedAt: String? }   // observeCreditConfirmation payload
 public struct MerchantReceipt { let merchantName: String; let merchantAddress: String; let transactionType: String; let totalAmountMinorUnits: Int64; let totalAmountFormatted: String; let maskedToken: String; let reference: String; let transactionHash: String?; let qrPayload: String }
-public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64?; let responseCode: String; let merchantStatus: String?; let transactionID: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }   // transactions.status → VeyraLookup<[TransactionStatus]>
+public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64?; let responseCode: String; let merchantStatus: String?; let transactionID: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }   // transactionStatus(...) → VeyraLookup<[TransactionStatus]>
 ```
 
 ---

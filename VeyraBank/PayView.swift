@@ -373,7 +373,7 @@ struct PayView: View {
     /// The active card can't start a payment while it must go online (exhausted
     /// keys) or the issuer has suspended it (polled status; unfreezes on a later ACTIVE poll).
     private func activeCardBlocked(_ cards: [Token]) -> Bool {
-        guard let active = cards.first(where: { $0.isActive }) else { return false }
+        guard let active = cards.first(where: { $0.isSelected }) else { return false }
         return active.requiresOnline || active.status == .suspended
     }
 

@@ -78,12 +78,11 @@ struct GetPaidView: View {
     private enum TapState {
         case waiting                       // armed — hold the phones together
         case dialogue                      // card connected, kernel dialogue running
-        case result(TapPaymentResult)
+        case result(TapResult)
         case failed(String)
     }
     @State private var tapState: TapState = .waiting
     @State private var tapHint: String?
-    @State private var tapSession: TapPaymentSession?
     // The retry rule for your order ID: an order can have several attempts. After NOT_SENT, RETRY,
     // DECLINED or FAILED no money moved, so the retry reuses it; after APPROVED or PENDING (or a
     // status this build does not know) the order is paid or may be, so the next sale takes a fresh one.
@@ -134,7 +133,7 @@ struct GetPaidView: View {
         // Mode is SDK-managed: the tap session claims SOFTPOS when it starts and releases it
         // when it ends — no screen choreography needed here.
         .onAppear {
-            merchant = VeyraSoftPOS.shared.merchant.stored
+            merchant = VeyraSoftPOS.shared.storedMerchantData()
         }
         .onDisappear {
             autoReturnTask?.cancel()
@@ -164,7 +163,7 @@ struct GetPaidView: View {
             Button("View receipt") {
                 autoReturnTask?.cancel()
                 Task { @MainActor in
-                    if let receipt = try? await VeyraSoftPOS.shared.transactions.receipt(forReference: reference) {
+                    if let receipt = try? await VeyraSoftPOS.shared.receipt(merchantTransactionReference: reference) {
                         resultReceipt = receipt
                     } else {
                         resultReceiptError = true
@@ -385,11 +384,11 @@ struct GetPaidView: View {
         .padding()
         .onDisappear {
             // Leaving the screen: stop a create still on the phone (by order ID).
-            if case .creating = qrState { _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) }
+            if case .creating = qrState { _ = VeyraSoftPOS.shared.cancelPayment(merchantOrderID: currentOrderID) }
             qrTask?.cancel()
             stopCreditConfirmationWatch()
             // Stop the SDK expiry watch so its callback can't fire into a dismissed view.
-            VeyraSoftPOS.shared.payments.cancelQrExpiry()
+            VeyraSoftPOS.shared.cancelQrExpiry()
         }
     }
 
@@ -409,7 +408,7 @@ struct GetPaidView: View {
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
-        guard let merchantID = merchant?.merchantID else {
+        guard merchant != nil else {
             qrState = .failed("Register as a merchant first")
             scheduleAutoReturn()
             return
@@ -417,20 +416,19 @@ struct GetPaidView: View {
         let amount = amountMinorUnits ?? 0
         qrTask = Task {
             do {
-                let context = try await VeyraSoftPOS.shared.payments.createContext(
-                    merchantID: merchantID,
+                let context = try await VeyraSoftPOS.shared.createPaymentContext(
                     amountMinorUnits: amount,
                     currency: SampleData.personal.currencyCode,
+                    // Your own order id — required; a retry after an attempt that moved no money
+                    // reuses it. The transaction reference is the SDK's to mint.
+                    merchantOrderID: takeOrderID(),
                     onExpired: {
                         // The SDK owns the expiry timer; drop the live QR to the expired
                         // placeholder the moment it fires (an expired QR must not stay
                         // scannable), rather than waiting for the next server poll.
                         qrState = .failed("This payment code has expired — please start a new payment")
                         scheduleAutoReturn()
-                    },
-                    // Your own order id — required; a retry after an attempt that moved no money
-                    // reuses it. The transaction reference is the SDK's to mint.
-                    merchantOrderID: takeOrderID()
+                    }
                 )
                 settleOrderID(responseStatus: context.responseStatus)
                 // Cancelled before it was sent: nothing was created — back to amount entry (the
@@ -462,14 +460,14 @@ struct GetPaidView: View {
                 while !Task.isCancelled {
                     try await Task.sleep(nanoseconds: 2_500_000_000)
                     // A poll that could not be made carries a reason and no state: just ask again.
-                    guard let status = try? await VeyraSoftPOS.shared.payments.contextStatus(txRef: txRef).value else {
+                    guard let status = try? await VeyraSoftPOS.shared.contextStatus(txRef: txRef).value else {
                         continue
                     }
                     if status.isSettled {
                         // The MPM context's txRef is the recorded transaction's reference.
                         lastPaymentReference = txRef
                         // Settled — stop the expiry watch so it can't overwrite the outcome later.
-                        VeyraSoftPOS.shared.payments.cancelQrExpiry()
+                        VeyraSoftPOS.shared.cancelQrExpiry()
                         qrState = .settled(approved: status.isApproved, responseCode: status.responseCode)
                         // An approved MPM sale waits on credit confirmation too. The
                         // settle itself can't say whether the bank supports it (the contexts
@@ -564,13 +562,11 @@ struct GetPaidView: View {
             Spacer()
             Button(tapFinished ? "Done" : "Cancel", role: tapFinished ? ButtonRole?.none : .destructive) {
                 if tapFinished {
-                    tapSession = nil
                     returnToHome()
                 } else {
                     // Cancel names the payment by its order ID. Before it is sent the reader stops
                     // and the tap's `.result` arrives NOT_SENT / CANCELLED (handled there).
                     cancelPayment {
-                        tapSession = nil
                         page = .amountEntry
                     }
                 }
@@ -581,8 +577,7 @@ struct GetPaidView: View {
         .onDisappear {
             // Leaving the screen: cancel a tap still on the phone by its order ID. One already
             // sent is not cancelled — it runs to its result, which the SDK records.
-            if !tapFinished { _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) }
-            tapSession = nil
+            if !tapFinished { _ = VeyraSoftPOS.shared.cancelPayment(merchantOrderID: currentOrderID) }
             // Render-only watch: stopping it stops the screen re-reading the store, never the
             // SDK's own credit polling, which is app-scoped.
             stopCreditConfirmationWatch()
@@ -622,16 +617,17 @@ struct GetPaidView: View {
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
-        let session = VeyraSoftPOS.shared.tap.session(
+        let request = TapRequest(
             amountMinorUnits: amountMinorUnits ?? 0,
             // Your own order id — required; reused to retry an attempt that moved no money (NOT_SENT,
             // RETRY, DECLINED, FAILED). The transaction reference is the SDK's to mint.
             merchantOrderID: takeOrderID()
-        ) { event in
+        )
+        let onEvent: @Sendable (TapEvent) -> Void = { event in
             switch event {
             case .cardDetected:
                 tapState = .dialogue
-            case .unsupportedTarget:
+            case .unsupportedCard:
                 tapState = .waiting
                 tapHint = "Card not supported — ask for their Veyra wallet and try again"
             // The four tap sub-phases. The first is the customer's phone leaving the field
@@ -656,7 +652,6 @@ struct GetPaidView: View {
                 // Cancelled before it was sent (Cancel / leaving): nothing was charged — back to
                 // amount entry; the order ID is kept for the retry.
                 if result.responseStatus == VeyraResponseStatus.notSent && result.responseStatusReason == "CANCELLED" {
-                    tapSession = nil
                     page = .amountEntry
                     return
                 }
@@ -675,11 +670,10 @@ struct GetPaidView: View {
                 }
             }
         }
-        tapSession = session
         do {
             // Refusals (blank order ID, the wallet's payment in flight) arrive as a NOT_SENT
             // .result; only a setup mistake throws.
-            try session.start()
+            try VeyraSoftPOS.shared.tap.start(request, onEvent: onEvent)
         } catch {
             tapState = .failed("Could not arm the reader: \(error.localizedDescription)")
             scheduleAutoReturn()
@@ -716,7 +710,7 @@ struct GetPaidView: View {
         guard case .scanCustomerQr = page else { return } // one transition per scan session
         Task { @MainActor in
             // NOT_SENT / INVALID_REQUEST means "not a payment QR": transient hint, stay armed.
-            if let inspection = try? await VeyraSoftPOS.shared.payments.inspectCustomerQr(payload),
+            if let inspection = try? await VeyraSoftPOS.shared.inspectCustomerQr(payload),
                let scanned = inspection.qr {
                 page = .confirmCustomerQr(scanned)
             } else {
@@ -766,7 +760,7 @@ struct GetPaidView: View {
         .onDisappear {
             // Leaving the screen: cancel a charge still on the phone by its order ID. One already
             // sent is not cancelled — it runs to its result, which the SDK records.
-            _ = VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID)
+            _ = VeyraSoftPOS.shared.cancelPayment(merchantOrderID: currentOrderID)
         }
     }
 
@@ -776,7 +770,7 @@ struct GetPaidView: View {
     /// result handler turns into "back to amount entry". `goBack` runs when there is nothing in
     /// flight to wait for.
     private func cancelPayment(goBack: () -> Void) {
-        switch VeyraSoftPOS.shared.payments.cancelPayment(merchantOrderID: currentOrderID) {
+        switch VeyraSoftPOS.shared.cancelPayment(merchantOrderID: currentOrderID) {
         case .cancelled:
             // The rail's own result (NOT_SENT / CANCELLED) takes the screen back.
             break
@@ -800,7 +794,7 @@ struct GetPaidView: View {
         creditConfirmState = nil
         Task { @MainActor in
             do {
-                let outcome = try await VeyraSoftPOS.shared.payments.chargeCustomerQr(
+                let outcome = try await VeyraSoftPOS.shared.chargeCustomerQr(
                     scanned,
                     // Yours, never a key — reused to retry an attempt that moved no money.
                     merchantOrderID: takeOrderID()
@@ -861,15 +855,14 @@ struct GetPaidView: View {
         // interval later. This is a notification, not the truth: the store re-read below stays,
         // and is what covers a screen opened after the fact. Registration is single-listener —
         // the next sale's watch replaces this one.
-        try? VeyraSoftPOS.shared.transactions.onCreditConfirmation { confirmation in
+        try? VeyraSoftPOS.shared.observeCreditConfirmation { confirmation in
             guard confirmation.reference == reference else { return }
             creditConfirmState = confirmation.status == "RECEIVED" ? .received : .unable
             scheduleAutoReturn()
         }
         creditWatchTask = Task { @MainActor in
             while !Task.isCancelled {
-                let row = try? await VeyraSoftPOS.shared.transactions.history(limit: 50)
-                    .first(where: { $0.reference == reference })
+                let row = try? await VeyraSoftPOS.shared.transaction(merchantTransactionReference: reference)
                 if let row {
                     if let status = row.creditConfirmationStatus {
                         creditConfirmState = status == "RECEIVED" ? .received : .unable
@@ -892,7 +885,7 @@ struct GetPaidView: View {
         creditWatchTask?.cancel()
         creditWatchTask = nil
         // Only this screen's observer goes; the SDK's app-scoped polling is untouched.
-        try? VeyraSoftPOS.shared.transactions.stopObservingCreditConfirmation()
+        try? VeyraSoftPOS.shared.stopObservingCreditConfirmation()
     }
 
     private func customerQrResult(_ approved: Bool, _ detail: String?) -> some View {
@@ -978,10 +971,10 @@ struct GetPaidView: View {
     }
 
     private func refreshStatusIfInactive() async {
-        guard !isActive, let merchantID = merchant?.merchantID else { return }
+        guard !isActive, merchant != nil else { return }
         // The facade refreshes the stored merchant's status as part of the lookup.
-        _ = try? await VeyraSoftPOS.shared.merchant.status(merchantID: merchantID)
-        merchant = VeyraSoftPOS.shared.merchant.stored
+        _ = try? await VeyraSoftPOS.shared.refreshStatus()
+        merchant = VeyraSoftPOS.shared.storedMerchantData()
     }
 }
 

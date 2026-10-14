@@ -225,15 +225,17 @@ struct HomeView: View {
         mode = ((try? VeyraSDK.shared.currentMode) ?? .none)
         signedIn = DemoSession.isSignedIn
         customerID = DemoSession.customerID
-        registered = signedIn && VeyraSoftPOS.shared.merchant.isRegistered
+        // The SDK's init-free read for the signed-in customer: Home gates "Get paid" without
+        // configuring the SoftPOS SDK (only the payment screens do that).
+        registered = signedIn && VeyraSoftPOS.isMerchantRegistered(customerID: customerID)
     }
 
     private func merchantAction(activate: Bool) async {
-        guard let merchantID = VeyraSoftPOS.shared.merchant.stored?.merchantID else { return }
+        guard VeyraSoftPOS.shared.hasStoredMerchant() else { return }
         do {
             let status = activate
-                ? try await VeyraSoftPOS.shared.merchant.activate(merchantID: merchantID)
-                : try await VeyraSoftPOS.shared.merchant.deactivate(merchantID: merchantID)
+                ? try await VeyraSoftPOS.shared.activate()
+                : try await VeyraSoftPOS.shared.deactivate()
             merchantActionMessage = status.responseStatus == VeyraResponseStatus.approved
                 ? "Merchant \(activate ? "activated" : "deactivated") (\(status.status ?? "?"))"
                 : "Could not \(activate ? "activate" : "deactivate") (\(status.responseStatus) · \(status.responseStatusReason ?? "?"))"

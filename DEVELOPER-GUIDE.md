@@ -1253,6 +1253,7 @@ Everything hangs off `VeyraWallet.shared` — the examples below hold it as `let
 | `verifyAccount(_:)` | Checks the account can be tokenised (`VerifyAccountParams`) | `VerifyAccountResponse` |
 | `digitise(_:)` | Adds the token: tokenises the account and stores the payment material on the phone (`DigitiseParams`) | `DigitiseResult` |
 | `cancelDigitise(clientRequestID:)` | Cancels an add-token still on the phone | `CancelResult` |
+| `deactivateDigitise(clientRequestID:)` | Switches off, on the server, the card a `digitise` created when its answer never reached the phone | `TokenStatusUpdateResponse` |
 
 Flow: `banks` → `verifyAccount` → `digitise`. On success the SDK receives, decrypts and stores the payment material on-device — the card can pay immediately (`APPROVED`) or after activation (`APPROVE_REQUIRE_AUTH`).
 
@@ -1344,11 +1345,42 @@ default:                                         // FAILED, or a status newer th
 
 `DigitiseParams` carries the same fields, and the same required ones, as Android's and React Native's: `accountNumber`, `institutionCode`, `accountHolderName`, `walletAccountID`, `emailAddress` and `recommendation` are required; everything else is optional.
 
-`DigitiseResult`: `tokenUniqueReference`, `responseCode` (the issuer's decision: `APPROVED`, `APPROVE_REQUIRE_AUTH`, `DECLINED`), `responseStatus` (`APPROVED` · `DECLINED` · `FAILED` · `NOT_SENT` — **never `PENDING`**), `responseStatusReason` (the cause — present on `APPROVE_REQUIRE_AUTH` too, where it says why step-up is needed), `message`, `activationMethods` (`medium` + masked `contact`), `tokenStored` (provisioning material decrypted and stored), `isApproved`, `requiresActivation`. Add-card has no reference of its own: after `FAILED` or `NOT_SENT` simply digitise again. `clientRequestID` (optional) is your reference for one attempt: pass one and `cancelDigitise(clientRequestID:)` can cancel the add-card while it is still on the phone ([Cancelling a call](#cancelling-a-call)); a cancelled attempt ends `NOT_SENT` / `CANCELLED`.
+`DigitiseResult`: `tokenUniqueReference`, `responseCode` (the issuer's decision: `APPROVED`, `APPROVE_REQUIRE_AUTH`, `DECLINED`), `responseStatus` (`APPROVED` · `DECLINED` · `FAILED` · `NOT_SENT` — **never `PENDING`**), `responseStatusReason` (the cause — present on `APPROVE_REQUIRE_AUTH` too, where it says why step-up is needed), `message`, `activationMethods` (`medium` + masked `contact`), `tokenStored` (provisioning material decrypted and stored), `clientRequestID` (the ID this attempt was sent with — yours, or the one the SDK generated; see [`deactivateDigitise`](#deactivatedigitise)), `isApproved`, `requiresActivation`. After `FAILED` or `NOT_SENT` digitise again with a new ID — after a lost answer, switch off any card it created first. `clientRequestID` (optional) is your reference for one attempt: pass one and `cancelDigitise(clientRequestID:)` can cancel the add-card while it is still on the phone ([Cancelling a call](#cancelling-a-call)); a cancelled attempt ends `NOT_SENT` / `CANCELLED`.
 
 #### `cancelDigitise`
 
 Set `clientRequestID` in `DigitiseParams`, then `cancelDigitise(clientRequestID:)` with the same value cancels the add-token while it is still on the phone. It answers at once with a `CancelResult` and never throws; a cancelled `digitise` ends `NOT_SENT` / `CANCELLED`. See [Cancelling a call](#cancelling-a-call).
+
+#### `deactivateDigitise`
+
+A `digitise` that was sent but got no usable answer ends `"FAILED"` with `NO_RESPONSE_RECEIVED` or
+`UPSTREAM_ERROR`. The Veyra token service may still have created the card, and its details never
+reached the phone, so it can never pay. Switch it off with the attempt's ID
+(`DigitiseResult.clientRequestID`), then let the customer add the card again — a new `digitise` with a
+new ID. Only the phone that sent the `digitise` can do this.
+
+```swift
+let result = try await wallet.digitise(params)
+if result.responseStatus == VeyraResponseStatus.failed,
+   ["NO_RESPONSE_RECEIVED", "UPSTREAM_ERROR"].contains(result.responseStatusReason ?? ""),
+   let lostID = result.clientRequestID {
+    let cleanup = try await wallet.deactivateDigitise(clientRequestID: lostID)
+    // APPROVED: switched off. FAILED / NO_TOKEN_CREATED or DIGITISATION_NOT_FOUND: nothing to
+    // switch off. PENDING: no answer — call again.
+}
+```
+
+| `responseStatus` / `responseStatusReason` | Meaning | What to do |
+|---|---|---|
+| `APPROVED` | The card was switched off (or already was). `tokenUniqueReference` names it; if it is on this phone it is removed with its data. | Let the customer add the card again. |
+| `FAILED` / `NO_TOKEN_CREATED` | The add-card ended before a card was created. | Nothing to switch off. |
+| `FAILED` / `DIGITISATION_NOT_FOUND` | No finished add-card with that ID from this phone. One still running on the server is not found until it ends. | If the add-card had only just failed, call again after a minute. |
+| `FAILED` / `TOKEN_STATE_CONFLICT` | The card's status does not allow switching it off. | Contact support. |
+| `PENDING` | Sent, no usable answer. | Call again — a repeat is harmless. |
+| `FAILED` / `INVALID_REQUEST` | The ID was blank; nothing was sent. | Pass the ID from `DigitiseResult`. |
+
+Every `clientRequestID` is used once: a `digitise` that reuses one this app has already sent is refused
+with `"FAILED"` / `DUPLICATE_CLIENT_REQUEST_ID`. Leave it `nil` and the SDK generates a new one each time.
 
 ---
 
@@ -2619,7 +2651,13 @@ lookup itself fails, the `VeyraLookup` (or `ReconcileResult`) carries a `failure
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | The cause, when there is one (e.g. `ACCOUNT_NAME_MISMATCH`) | Added, but the customer must activate it (`requiresActivation`); run [activation](#activation) with the returned `activationMethods` |
 | Add card | `DECLINED` | `DECLINED` | The issuer's reason — see below | The issuer refused this account; show the reason. The flow ends |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | The token service could not complete it; start a new add-card |
-| Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer ([Table A](#table-a--outcomes-the-sdk-itself-produces)); start a new add-card |
+| Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer ([Table A](#table-a--outcomes-the-sdk-itself-produces)). The card may have been created without reaching the phone: switch it off with `deactivateDigitise(clientRequestID: result.clientRequestID!)`, then start a new add-card |
+| Add card | `FAILED` | — | `DUPLICATE_CLIENT_REQUEST_ID` | This `clientRequestId` was already used for an add card; nothing was created. Send a new one (or leave it unset so the SDK generates one) |
+| Switch off a lost add card (`deactivateDigitise(clientRequestID:)`) | `APPROVED` | — | — | The card the add card created was switched off (or already was); `tokenUniqueReference` names it. Let the customer add the card again |
+| Switch off a lost add card | `FAILED` | — | `NO_TOKEN_CREATED` | The add card ended before a card was created — nothing to switch off |
+| Switch off a lost add card | `FAILED` | — | `DIGITISATION_NOT_FOUND` | No finished add card with that id from this phone; one still running is not found until it ends — call again after a minute |
+| Switch off a lost add card | `FAILED` | — | `TOKEN_STATE_CONFLICT` | The card's status does not allow it to be switched off |
+| Switch off a lost add card | `PENDING` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | Sent, no usable answer — call again; a repeat is harmless |
 | Activation code request (`requestActivationCode`) | `FAILED` | — | The failure code, e.g. `TOKEN_NOT_FOUND`, `ACTIVATION_LOCKED`, `CODE_REQUEST_RATE_LIMITED`, `ACTIVATION_FAILED` (typed in `failureCode`) | Can't send a code now; locked or rate-limited → wait or contact the issuer |
 | Activation code verify (`activate`) | `FAILED` | — | The failure code, e.g. `CODE_INVALID`, `CODE_EXPIRED`, `MAX_ATTEMPTS_EXCEEDED`, `NO_PENDING_ACTIVATION`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `ACTIVATION_FAILED` (typed in `failureCode`) | Wrong or expired code → ask again (`attemptsRemaining` is included); max attempts or locked → remove the card and add it again |
 | Card status / removal (`tokenStatus`, `deactivateToken`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `TOKEN_STATE_CONFLICT`, `TOKEN_UNIQUE_REFERENCE_REQUIRED` | The card isn't known, or the change isn't allowed from its current state. A removal that is not `APPROVED` leaves the card on the device |

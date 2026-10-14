@@ -309,7 +309,7 @@ struct PayView: View {
     private func deactivate(_ tokenUniqueReference: String) async {
         actionError = nil
         do {
-            let removal = try await VeyraWallet.shared.deactivateToken(tokenUniqueReference)
+            let removal = try await removeCard(tokenUniqueReference)
             // Only APPROVED removed the card; anything else leaves it in the wallet, so say why.
             guard removal.responseStatus == ResponseStatus.approved else {
                 actionError = removalError(removal)
@@ -330,7 +330,7 @@ struct PayView: View {
         working = true
         defer { working = false }
         do {
-            let removal = try await VeyraWallet.shared.deactivateToken(tokenUniqueReference)
+            let removal = try await removeCard(tokenUniqueReference)
             guard removal.responseStatus == ResponseStatus.approved else {
                 actionError = removalError(removal)
                 return
@@ -340,6 +340,19 @@ struct PayView: View {
         } catch {
             actionError = String(describing: error)
         }
+    }
+
+    /// Removes a card by the add-card attempt that created it; on `APPROVED` the SDK removes the card
+    /// from this phone. A card with no recorded ID is removed by its token reference.
+    private func removeCard(_ tokenUniqueReference: String) async throws -> TokenStatusUpdateResponse {
+        let removal: TokenStatusUpdateResponse
+        if let clientRequestID = CardRequestIDs.get(tokenUniqueReference) {
+            removal = try await VeyraWallet.shared.deactivateDigitise(clientRequestID: clientRequestID)
+        } else {
+            removal = try await VeyraWallet.shared.deactivateToken(tokenUniqueReference)
+        }
+        if removal.responseStatus == ResponseStatus.approved { CardRequestIDs.forget(tokenUniqueReference) }
+        return removal
     }
 
     /// Why a card removal did not happen. Only a setup mistake throws; every other answer is an outcome.

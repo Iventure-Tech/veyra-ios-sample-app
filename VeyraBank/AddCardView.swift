@@ -268,6 +268,8 @@ struct AddCardView: View {
             let reason = r.responseStatusReason.map { " (\($0))" } ?? ""
             digitiseResult = "\(r.responseStatus ?? "unknown")\(reason) · \(r.responseCode ?? "-")\(tur)\(stored)"
             digitiseSucceeded = r.tokenStored
+            // "Remove card" later names this add-card attempt by its ID.
+            CardRequestIDs.record(r)
             // Sent, but no usable answer: the server may have created a card this phone never
             // received. Switch it off by this attempt's ID; the next "Add" is a new attempt.
             if Self.shouldDeactivateLostDigitise(r), let lostID = r.clientRequestID {

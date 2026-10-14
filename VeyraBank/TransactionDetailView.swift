@@ -79,7 +79,7 @@ struct TransactionDetailView: View {
                     row("Date") { Text(date) }
                     row("Time") { Text(time) }
                 }
-                if let currency = liveRow.transactionCurrencyCode, !currency.isEmpty {
+                if let currency = liveRow.currencyCode, !currency.isEmpty {
                     row("Currency") { Text(currency).font(.subheadline.monospaced()) }
                 }
 
@@ -430,7 +430,7 @@ struct TransactionDetailView: View {
     }
 
     private var amountText: String {
-        String(format: "%.2f", Double(liveRow.amountInMinorUnit) / 100.0)
+        String(format: "%.2f", Double(liveRow.amountMinorUnits) / 100.0)
     }
 
     private var statusText: String {
@@ -479,7 +479,7 @@ struct WalletReceiptDetailView: View {
                         if let address = receipt.merchantAddress, !address.isEmpty {
                             Text(address).font(.footnote).foregroundStyle(.secondary)
                         }
-                        if let id = receipt.merchantId, !id.isEmpty {
+                        if let id = receipt.merchantID, !id.isEmpty {
                             Text("ID: \(id)").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
@@ -492,7 +492,7 @@ struct WalletReceiptDetailView: View {
                     row("Time", receipt.transactionTime)
                     if let card = receipt.maskedToken, !card.isEmpty { row("Card", card) }
                     if let ref = receipt.merchantTransactionReference, !ref.isEmpty { row("Reference", ref) }
-                    if let txnId = receipt.transactionId, !txnId.isEmpty { row("Transaction ID", txnId) }
+                    if let txnId = receipt.transactionID, !txnId.isEmpty { row("Transaction ID", txnId) }
                     if let cdcvm = cdcvmText { row("Verification", cdcvm) }
                 }
             }
@@ -514,7 +514,7 @@ struct WalletReceiptDetailView: View {
     }
 
     private var amountText: String {
-        if let currency = receipt.currency, !currency.isEmpty {
+        if let currency = receipt.currencyCode, !currency.isEmpty {
             return "\(receipt.totalAmountFormatted) \(currency)"
         }
         return receipt.totalAmountFormatted

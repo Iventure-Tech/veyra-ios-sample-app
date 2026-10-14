@@ -11,7 +11,7 @@ import VeyraWallet
 struct PayView: View {
     enum CardsState {
         case loading
-        case loaded([StoredCard])
+        case loaded([Token])
         case failed(String)
     }
 
@@ -20,7 +20,7 @@ struct PayView: View {
     @State private var selectedID: String?
     @State private var actionError: String?
     /// The card queued for removal — drives the confirmation dialog.
-    @State private var pendingRemoval: StoredCard?
+    @State private var pendingRemoval: Token?
     @State private var working = false
     /// Payment-keys state for the focused card.
 
@@ -136,7 +136,7 @@ struct PayView: View {
 
     /// Apple-Wallet-style stack: fanned cards peeking; tapping one brings it to the front and
     /// compresses the rest below; tapping again returns to the fan.
-    private func cardStack(_ cards: [StoredCard]) -> some View {
+    private func cardStack(_ cards: [Token]) -> some View {
         ScrollView {
             ZStack(alignment: .top) {
                 ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
@@ -151,7 +151,7 @@ struct PayView: View {
                         // Wallet management: pick the token payments use, or
                         // deactivate (server + full on-device wipe + promotion).
                         .contextMenu {
-                            if !card.isActive {
+                            if !card.isSelected {
                                 Button {
                                     Task { await setActive(card.tokenUniqueReference) }
                                 } label: {
@@ -208,7 +208,7 @@ struct PayView: View {
         }
     }
 
-    private func cardActions(_ card: StoredCard) -> some View {
+    private func cardActions(_ card: Token) -> some View {
         VStack(spacing: 10) {
             // Transaction history + receipts for this token.
             NavigationLink {
@@ -219,7 +219,7 @@ struct PayView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 12) {
-                if !card.isActive {
+                if !card.isSelected {
                     Button {
                         Task { await setActive(card.tokenUniqueReference) }
                     } label: {
@@ -289,11 +289,13 @@ struct PayView: View {
         }
         try? VeyraWallet.shared.observePaymentRefusals(
             forTokenUniqueReference: tokenUniqueReference,
-            onRequireOnline: { _, amountMinorUnits, _ in
+            onRequireOnline: { event in
+                let amountMinorUnits = event.amountMinorUnits
                 refusal = "Connect to the internet — this card needs to refresh before it can pay "
                     + naira(amountMinorUnits) + "."
             },
-            onAmountExceedCardLimit: { _, _, cardLimitMinorUnits, _ in
+            onAmountExceedCardLimit: { event in
+                let cardLimitMinorUnits = event.cardLimitMinorUnits
                 refusal = cardLimitMinorUnits.map {
                     "This card can pay at most " + naira($0)
                         + " in one payment — try a smaller amount, or another card."
@@ -355,7 +357,7 @@ struct PayView: View {
         }
     }
 
-    private func offsetY(index: Int, card: StoredCard, in cards: [StoredCard]) -> CGFloat {
+    private func offsetY(index: Int, card: Token, in cards: [Token]) -> CGFloat {
         guard let selectedID else { return CGFloat(index) * 84 } // fanned: each peeks below the last
         if card.id == selectedID { return 0 }                    // focused card at the top
         // The rest compress into a tight stack under the focused card.
@@ -364,15 +366,15 @@ struct PayView: View {
         return 250 + CGFloat(position) * 40
     }
 
-    private func zIndex(index: Int, card: StoredCard) -> Double {
+    private func zIndex(index: Int, card: Token) -> Double {
         card.id == selectedID ? 1000 : Double(index)
     }
 
     /// The active card can't start a payment while it must go online (exhausted
     /// keys) or the issuer has suspended it (polled status; unfreezes on a later ACTIVE poll).
-    private func activeCardBlocked(_ cards: [StoredCard]) -> Bool {
+    private func activeCardBlocked(_ cards: [Token]) -> Bool {
         guard let active = cards.first(where: { $0.isActive }) else { return false }
-        return active.requiresOnline || active.status.uppercased() == "SUSPENDED"
+        return active.requiresOnline || active.status == .suspended
     }
 
     /// Subscribe to the two card-state pushes.
@@ -390,7 +392,7 @@ struct PayView: View {
             Task { await reload() }
         }
         // Keys ran out, or a refresh replenished them — `requiresOnline` drives `activeCardBlocked`.
-        try? VeyraWallet.shared.observeCardKeyStateChanged { _ in
+        try? VeyraWallet.shared.observeTokenKeyStateChanged { _ in
             Task { await reload() }
         }
     }
@@ -411,10 +413,10 @@ struct PayView: View {
 /// One card face — bank name + contactless glyph, masked DPAN, holder + expiry, and an
 /// activation badge when the token still needs activating.
 private struct CardFace: View {
-    let card: StoredCard
+    let card: Token
 
     /// Polled issuer-side suspension (derived-not-sticky — clears on an ACTIVE poll).
-    private var isSuspended: Bool { card.status.uppercased() == "SUSPENDED" }
+    private var isSuspended: Bool { card.status == .suspended }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -435,7 +437,7 @@ private struct CardFace: View {
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(.orange.opacity(0.9), in: Capsule())
                         .foregroundStyle(.black)
-                } else if card.isActive {
+                } else if card.isSelected {
                     // The wallet's active token — the one payments use.
                     Text("Active")
                         .font(.caption2.weight(.semibold))

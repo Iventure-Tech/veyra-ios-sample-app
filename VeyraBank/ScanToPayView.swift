@@ -123,7 +123,7 @@ struct ScanToPayView: View {
             }
             VStack(spacing: 2) {
                 Text("Amount").font(.footnote).foregroundStyle(.secondary)
-                Text("₦\(payment.amount)")
+                Text("₦\(payment.amountDisplay)")
                     .font(.system(size: 40, weight: .bold, design: .rounded))
             }
             if let confirmError {
@@ -199,7 +199,7 @@ struct ScanToPayView: View {
                 switch state {
                 case .approved:
                     stage = .result(state: state, headline: "Payment approved",
-                                    detail: "₦\(payment.amount) to \(payment.merchantName)")
+                                    detail: "₦\(payment.amountDisplay) to \(payment.merchantName)")
                 case .pending:
                     stage = .result(
                         state: state, headline: "Payment pending",

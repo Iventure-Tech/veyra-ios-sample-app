@@ -211,7 +211,7 @@ struct AddCardView: View {
                 institutionCode: selectedInstitutionCode,
                 walletAccountID: trimmed(email),
                 accountHolderName: trimmed(accountName),
-                accountNumberSource: "MANUAL" // the account number was keyed in by the user
+                accountNumberSource: .manual // the account number was keyed in by the user
             ))
             // Branch on the status; show the reason (the issuer's, or why it never reached Veyra).
             let reason = response.responseStatusReason.map { " (\($0))" } ?? ""
@@ -249,7 +249,7 @@ struct AddCardView: View {
                 accountHolderAddress: user.fullAddress,
                 mobileNumber: user.mobileNumber,
                 clientRequestID: requestID,
-                accountNumberSource: "MANUAL",
+                accountNumberSource: .manual,
                 deviceScore: .trusted,
                 accountScore: .highlyTrusted,
                 recommendationReasons: [.goodActivityHistory],

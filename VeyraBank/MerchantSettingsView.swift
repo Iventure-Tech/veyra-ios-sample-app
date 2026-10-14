@@ -33,7 +33,7 @@ struct MerchantSettingsView: View {
     // Bank picker: the registration/edit forms use a dropdown loaded from the SDK's
     // banks lookup, preselected to the sample/stored institution; static code shown as fallback
     // while loading or on failure.
-    @State private var banks: [SettlementBank] = []
+    @State private var banks: [Bank] = []
     @State private var selectedBankCode = ""
 
     private var sample: SampleMerchant { isBusiness ? SampleData.business : SampleData.personal }
@@ -111,7 +111,7 @@ struct MerchantSettingsView: View {
             banks = list.banks
             // An empty bank picker on an offline device must say why — reconnecting is the only
             // thing that fixes it, and the merchant cannot guess that.
-            if list.responseStatus != VeyraResponseStatus.approved {
+            if list.responseStatus != ResponseStatus.approved {
                 errorText = list.responseStatusReason == "NO_NETWORK_CONNECTION"
                     ? "No internet connection — reconnect to load settlement banks."
                     : "Could not load settlement banks (\(list.responseStatusReason ?? list.responseStatus))."
@@ -246,12 +246,12 @@ struct MerchantSettingsView: View {
             )
             // Every registration ends with an outcome — branch on its status.
             switch result.responseStatus {
-            case VeyraResponseStatus.approved:
+            case ResponseStatus.approved:
                 // The SDK has persisted the merchant — reload so the screen flips to edit mode
                 // and Home unlocks Get paid on return.
                 resultText = "Registered: \(result.merchantID ?? "?") · terminal \(result.terminalID ?? "?")"
                 load()
-            case VeyraResponseStatus.pending:
+            case ResponseStatus.pending:
                 // Sent, but no usable answer: check the status before registering again.
                 errorText = "No answer yet — check the merchant's status before trying again."
             default:
@@ -282,7 +282,7 @@ struct MerchantSettingsView: View {
                     institutionCode: selectedBankCode.isEmpty ? merchant.institutionCode : selectedBankCode
                 )
             )
-            resultText = "Profile updated (\(status.status ?? "OK"))"
+            resultText = "Profile updated (\(status.merchantStatus ?? "OK"))"
             load()
         } catch {
             errorText = String(describing: error)

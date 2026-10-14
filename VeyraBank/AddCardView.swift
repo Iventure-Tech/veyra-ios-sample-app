@@ -180,7 +180,7 @@ struct AddCardView: View {
                 accountNumber: trimmed.isEmpty ? nil : trimmed
             )
             // A read answers an outcome: no banks comes with the reason (offline above all).
-            guard list.responseStatus == VeyraResponseStatus.approved else {
+            guard list.responseStatus == ResponseStatus.approved else {
                 banksState = .failed(list.responseStatusReason == "NO_NETWORK_CONNECTION"
                     ? "No internet connection — connect and try again."
                     : "Could not load banks (\(list.responseStatusReason ?? list.responseStatus)).")
@@ -210,7 +210,7 @@ struct AddCardView: View {
                 institutionCode: selectedInstitutionCode,
                 walletAccountID: trimmed(email),
                 accountHolderName: trimmed(accountName),
-                accountNumberSource: "MANUAL" // the account number was keyed in by the user
+                accountNumberSource: .manual // the account number was keyed in by the user
             ))
             // Branch on the status; show the reason (the issuer's, or why it never reached Veyra).
             let reason = response.responseStatusReason.map { " (\($0))" } ?? ""
@@ -250,14 +250,14 @@ struct AddCardView: View {
                 accountHolderAddress: user.fullAddress,
                 mobileNumber: user.mobileNumber,
                 clientRequestID: requestID,
-                accountNumberSource: "MANUAL",
+                accountNumberSource: .manual,
                 deviceScore: .trusted,
                 accountScore: .highlyTrusted,
                 recommendationReasons: [.goodActivityHistory],
                 bankName: selectedBankName
             ))
             // Cancelled before anything was sent: NOT_SENT / CANCELLED — close the screen.
-            if r.responseStatus == VeyraResponseStatus.notSent && r.responseStatusReason == "CANCELLED" {
+            if r.responseStatus == ResponseStatus.notSent && r.responseStatusReason == "CANCELLED" {
                 presentationMode.wrappedValue.dismiss()
                 return
             }
@@ -284,7 +284,7 @@ struct AddCardView: View {
     /// `UPSTREAM_ERROR`) may have left a card on the server that this phone never received. Anything
     /// else created nothing or delivered its card, so there is nothing to switch off.
     static func shouldDeactivateLostDigitise(_ r: DigitiseResult) -> Bool {
-        r.responseStatus == VeyraResponseStatus.failed &&
+        r.responseStatus == ResponseStatus.failed &&
             ["NO_RESPONSE_RECEIVED", "UPSTREAM_ERROR"].contains(r.responseStatusReason ?? "") &&
             !(r.clientRequestID ?? "").isEmpty
     }

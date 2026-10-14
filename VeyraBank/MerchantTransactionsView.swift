@@ -101,9 +101,9 @@ struct MerchantTransactionsView: View {
             var text: String
             if let order = lookup.value {
                 switch order.responseStatus {
-                case VeyraResponseStatus.approved:
+                case ResponseStatus.approved:
                     text = "Paid — do not take another payment for this order."
-                case VeyraResponseStatus.pending:
+                case ResponseStatus.pending:
                     text = "A payment may still be going through — do not take another payment yet."
                 default:
                     text = "Not paid (\(order.responseStatus)\(order.responseStatusReason.map { " · \($0)" } ?? "")) — you can take a payment with the same order id."
@@ -183,7 +183,7 @@ struct MerchantTransactionsView: View {
                 // iOS. On an approved row this is the button that applies; on a pending one,
                 // "Check status" is.
                 if Self.canCheckCredit(tx) {
-                    if checkingCredit == tx.reference {
+                    if checkingCredit == tx.merchantTransactionReference {
                         HStack(spacing: 6) {
                             ProgressView().scaleEffect(0.7)
                             Text("Checking whether the merchant's bank received the funds…")
@@ -191,14 +191,14 @@ struct MerchantTransactionsView: View {
                         }
                     } else {
                         Button("Check merchant credit") {
-                            Task { await checkMerchantCredit(tx.reference) }
+                            Task { await checkMerchantCredit(tx.merchantTransactionReference) }
                         }
                         .font(.caption2)
                         // The SDK has no throttle by design — the screen disables its own button.
                         .disabled(checkingCredit != nil)
                     }
                 }
-                if let note = creditCheckNotes[tx.reference] {
+                if let note = creditCheckNotes[tx.merchantTransactionReference] {
                     Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
                 // The card's display name — a Veyra token shows e.g. "AFRIGO ****1234". Off
@@ -214,7 +214,7 @@ struct MerchantTransactionsView: View {
                 // the merchant's transaction detail on iOS. It is the documented route to an answer
                 // past the SDK's 30-day give-up.
                 if Self.canCheckStatus(tx) {
-                    if checkingStatus == tx.reference {
+                    if checkingStatus == tx.merchantTransactionReference {
                         HStack(spacing: 6) {
                             ProgressView().scaleEffect(0.7)
                             Text("Checking the payment status…")
@@ -222,21 +222,21 @@ struct MerchantTransactionsView: View {
                         }
                     } else {
                         Button("Check status") {
-                            Task { await checkStatus(tx.reference) }
+                            Task { await checkStatus(tx.merchantTransactionReference) }
                         }
                         .font(.caption2)
                         // The SDK has no throttle by design — the screen disables its own button.
                         .disabled(checkingStatus != nil)
                     }
                 }
-                if let note = statusCheckNotes[tx.reference] {
+                if let note = statusCheckNotes[tx.merchantTransactionReference] {
                     Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
             }
             // An explicit receipt CTA — an invisible whole-row tap reads as
             // "no capability" on device.
             if Self.hasReceipt(tx) {
-                Button { Task { await loadReceipt(tx.reference) } } label: {
+                Button { Task { await loadReceipt(tx.merchantTransactionReference) } } label: {
                     Image(systemName: "qrcode")
                         .font(.title3)
                         .foregroundStyle(.white)
@@ -283,7 +283,7 @@ struct MerchantTransactionsView: View {
                 return
             }
             let fresh = lookup.value
-            if let fresh, let i = transactions.firstIndex(where: { $0.reference == reference }) {
+            if let fresh, let i = transactions.firstIndex(where: { $0.merchantTransactionReference == reference }) {
                 transactions[i] = fresh
             }
             if fresh?.status == "PENDING" {
@@ -320,7 +320,7 @@ struct MerchantTransactionsView: View {
                 return
             }
             let fresh = lookup.value
-            if let fresh, let i = transactions.firstIndex(where: { $0.reference == reference }) {
+            if let fresh, let i = transactions.firstIndex(where: { $0.merchantTransactionReference == reference }) {
                 transactions[i] = fresh
             }
             if fresh?.creditConfirmationStatus != "RECEIVED" {
@@ -359,7 +359,7 @@ struct MerchantTransactionsView: View {
 /// Shared with GetPaidView's post-payment View-receipt CTA.
 struct ReceiptBox: Identifiable {
     let receipt: MerchantReceipt
-    var id: String { receipt.reference }
+    var id: String { receipt.merchantTransactionReference }
 }
 
 /// The receipt QR (rendered on-device via CIFilter) + summary.

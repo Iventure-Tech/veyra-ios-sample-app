@@ -63,7 +63,7 @@ struct AddCardView: View {
                     .autocorrectionDisabled()
                 TextField("Account name", text: $accountName)
                     .textInputAutocapitalization(.words)
-                TextField("BVN", text: $bvn)
+                TextField("BVN (optional)", text: $bvn)
                     .keyboardType(.numberPad)
                 TextField("Email", text: $email)
                     .keyboardType(.emailAddress)
@@ -152,7 +152,6 @@ struct AddCardView: View {
         formError = nil
         if trimmed(customerID).isEmpty { formError = "Enter the customer ID"; return false }
         if trimmed(accountName).isEmpty { formError = "Enter the account name"; return false }
-        if trimmed(bvn).isEmpty { formError = "Enter the BVN"; return false }
         if !isPlausibleEmail(trimmed(email)) { formError = "Enter a valid email"; return false }
         if !DemoSession.isSignedIn || DemoSession.customerID != trimmed(customerID) {
             DemoSession.signIn(trimmed(customerID))
@@ -245,7 +244,9 @@ struct AddCardView: View {
                 emailAddress: trimmed(email),
                 recommendation: .approve,
                 consumerIdentifier: trimmed(customerID),
-                bvn: trimmed(bvn),
+                // Optional: an issuer's own app may leave it out (the backend refuses a non-issuer
+                // app with BVN_REQUIRED). An empty field is sent as no BVN at all, never as "".
+                bvn: trimmed(bvn).isEmpty ? nil : trimmed(bvn),
                 accountHolderAddress: user.fullAddress,
                 mobileNumber: user.mobileNumber,
                 clientRequestID: requestID,

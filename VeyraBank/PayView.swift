@@ -309,7 +309,7 @@ struct PayView: View {
         do {
             let removal = try await VeyraWallet.shared.deactivateToken(tokenUniqueReference)
             // Only APPROVED removed the card; anything else leaves it in the wallet, so say why.
-            guard removal.responseStatus == VeyraResponseStatus.approved else {
+            guard removal.responseStatus == ResponseStatus.approved else {
                 actionError = removalError(removal)
                 return
             }
@@ -329,7 +329,7 @@ struct PayView: View {
         defer { working = false }
         do {
             let removal = try await VeyraWallet.shared.deactivateToken(tokenUniqueReference)
-            guard removal.responseStatus == VeyraResponseStatus.approved else {
+            guard removal.responseStatus == ResponseStatus.approved else {
                 actionError = removalError(removal)
                 return
             }
@@ -348,7 +348,7 @@ struct PayView: View {
             return "No internet connection — connect and try again. The card was not removed."
         }
         switch r.responseStatus {
-        case VeyraResponseStatus.pending:
+        case ResponseStatus.pending:
             return "We couldn't confirm the removal yet (\(r.responseStatusReason ?? "pending")). Check again shortly."
         default:
             return "The card could not be removed (\(r.responseStatusReason ?? r.responseStatus))."

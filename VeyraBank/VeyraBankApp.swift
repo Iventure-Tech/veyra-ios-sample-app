@@ -238,8 +238,8 @@ struct HomeView: View {
             let status = activate
                 ? try await VeyraSoftPOS.shared.activate()
                 : try await VeyraSoftPOS.shared.deactivate()
-            merchantActionMessage = status.responseStatus == VeyraResponseStatus.approved
-                ? "Merchant \(activate ? "activated" : "deactivated") (\(status.status ?? "?"))"
+            merchantActionMessage = status.responseStatus == ResponseStatus.approved
+                ? "Merchant \(activate ? "activated" : "deactivated") (\(status.merchantStatus ?? "?"))"
                 : "Could not \(activate ? "activate" : "deactivate") (\(status.responseStatus) · \(status.responseStatusReason ?? "?"))"
         } catch {
             merchantActionMessage = "Failed to \(activate ? "activate" : "deactivate") merchant"

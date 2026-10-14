@@ -173,7 +173,7 @@ struct ScanToPayView: View {
             let outcome = try await VeyraWallet.shared.payScannedContext(payment)
             // NOT_SENT: nothing was sent — stay on confirm with the reason and let the customer pay
             // the same QR again once it is fixed (cancelled sheet, card needs refreshing, offline…).
-            if outcome.responseStatus == VeyraResponseStatus.notSent {
+            if outcome.responseStatus == ResponseStatus.notSent {
                 // Cancelled before it was sent (Cancel payment): nothing left the phone — go back.
                 if outcome.responseStatusReason == "CANCELLED" {
                     dismiss()

@@ -181,7 +181,7 @@ struct AddCardView: View {
                 accountNumber: trimmed.isEmpty ? nil : trimmed
             )
             // A read answers an outcome: no banks comes with the reason (offline above all).
-            guard list.responseStatus == VeyraResponseStatus.approved else {
+            guard list.responseStatus == ResponseStatus.approved else {
                 banksState = .failed(list.responseStatusReason == "NO_NETWORK_CONNECTION"
                     ? "No internet connection — connect and try again."
                     : "Could not load banks (\(list.responseStatusReason ?? list.responseStatus)).")
@@ -256,7 +256,7 @@ struct AddCardView: View {
                 bankName: selectedBankName
             ))
             // Cancelled before anything was sent: NOT_SENT / CANCELLED — close the screen.
-            if r.responseStatus == VeyraResponseStatus.notSent && r.responseStatusReason == "CANCELLED" {
+            if r.responseStatus == ResponseStatus.notSent && r.responseStatusReason == "CANCELLED" {
                 presentationMode.wrappedValue.dismiss()
                 return
             }

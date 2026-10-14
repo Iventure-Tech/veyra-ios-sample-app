@@ -454,6 +454,7 @@ let softposConfig = VeyraSoftPOSConfiguration(
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults — no URLs to supply. |
 | `paymentAppProviderID` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet configuration's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. |
+| `requestTimeoutSeconds` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
 
 ### `VeyraWalletConfiguration`
 
@@ -480,8 +481,36 @@ let walletConfig = VeyraWalletConfiguration(
 | `bundleID` | Optional | Override for the app's bundle ID (the attestation binding suffix). Normally leave `nil` — auto-detected from `Bundle.main`. |
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
+| `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
 
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
+
+### Request timeout
+
+Both configurations take an optional `requestTimeoutSeconds`: the longest the SDK waits for one
+call to the Veyra backend, start to finish (connecting, sending and waiting for the answer).
+Each SDK uses its own value, so a combined app can give SoftPOS and the wallet different
+timeouts.
+
+```swift
+let softposConfig = VeyraSoftPOSConfiguration(
+    environment: .test, paymentAppProviderID: providerID, requestTimeoutSeconds: 20)
+let walletConfig = VeyraWalletConfiguration(
+    environment: .test, paymentAppProviderID: providerID, tokenRequestorID: requestorID,
+    appleTeamID: "YOURTEAMID1", requestTimeoutSeconds: 30)
+```
+
+- **Allowed values: 5 to 60.** Anything else makes `configure` throw `invalidConfiguration`,
+  naming the value and the range. The SDK never adjusts the value.
+- **Not set:** the SDK keeps its own timeout of 60 s per call.
+- **It applies to every backend call the SDK makes,** including the token request and calls
+  through a `VeyraProxyProvider` (your backend's relay is given the same time limit). It does not
+  change the NFC scan timeouts or the card-activation wait.
+- **A payment that runs out of time is pending, not failed.** The request may already have
+  reached the server, so the payment ends `PENDING` (`68` / `NO_RESPONSE_RECEIVED`) and the SDK
+  checks the result later. A shorter timeout gives the user an answer sooner, but more payments
+  will be pending rather than final. A longer one gets more final answers on a slow network,
+  but the user waits longer.
 
 ### `Environment`
 
@@ -2194,7 +2223,7 @@ facade's `VeyraSDKError` has one case, `.notConfigured`.
 |---|---|---|
 | `.notConfigured` | Any call before `VeyraWallet.configure(customerID:config:provider:)` / `VeyraSoftPOS.configure(customerID:config:provider:)`. In a combined app, `VeyraSDKError.notConfigured` is thrown by `VeyraSDK.shared.currentMode()`, `.wallet` and `.softpos` before `VeyraSDK.configure(customerID:config:provider:)` | Configure the SDK first, at app start. |
 | `.notSignedIn` | Any call with no customer — after `signOut()`, before the next `configure` | Call `configure` with the customer before using the SDK. Don't call wallet or merchant APIs from screens reachable while signed out. |
-| `.invalidConfiguration(message:)` | Thrown by `configure`: a provider it can't use (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`); a provider of a different kind from an earlier `configure` in this process; a blank `customerID`. `VeyraSDK.configure` throws the member SDK's case. Thrown by the call that needs it: a missing required wallet setting (payment app provider ID, token requestor ID, Apple Team ID) on `verifyAccount` / `digitise`; and `tap.start(_:onEvent:)` when both SDKs are in one app without `VeyraSDK` | Fix the configuration. `message` names the exact problem. |
+| `.invalidConfiguration(message:)` | Thrown by `configure`: a provider it can't use (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`); a provider of a different kind from an earlier `configure` in this process; a blank `customerID`; a `requestTimeoutSeconds` outside 5–60. `VeyraSDK.configure` throws the member SDK's case. Thrown by the call that needs it: a missing required wallet setting (payment app provider ID, token requestor ID, Apple Team ID) on `verifyAccount` / `digitise`; and `tap.start(_:onEvent:)` when both SDKs are in one app without `VeyraSDK` | Fix the configuration. `message` names the exact problem. |
 | `.sessionRequired` | A payment call made without its screen session | Declared for parity with React Native, which raises it. On iOS the SDK follows the screen lifecycle itself, so you should never see it. |
 | `.unsupportedOnPlatform` | A method this platform can't perform | Declared for parity with Android and React Native. The iOS SDK exposes no wallet tap-to-pay method at all (iOS does not allow card emulation), so no current iOS call throws it — the wallet pays by QR. |
 

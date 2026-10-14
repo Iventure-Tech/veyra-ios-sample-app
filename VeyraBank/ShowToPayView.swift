@@ -43,7 +43,7 @@ struct ShowToPayView: View {
             reconcileTask?.cancel()
             reconcileTask = nil
             // Stop the SDK's expiry watch so its callback can't fire into a dismissed view.
-            VeyraWallet.shared.tokenisation.cancelQrExpiry()
+            VeyraWallet.shared.cancelQrExpiry()
         }
     }
 
@@ -148,7 +148,7 @@ struct ShowToPayView: View {
             // render, so a regenerate after expiry asks again on its own.
             // The SDK owns the expiry timer and fires onExpired when the QR lapses — blank the
             // code then (an expired QR must not stay scannable).
-            let qr = try await VeyraWallet.shared.tokenisation.showQrToPay(amountMinorUnits: amount) {
+            let qr = try await VeyraWallet.shared.showQrToPay(amountMinorUnits: amount) {
                 expired = true
             }
             // Showing a QR ends with an outcome: APPROVED (a QR was made) or NOT_SENT with the
@@ -201,7 +201,7 @@ struct ShowToPayView: View {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !Task.isCancelled else { return }
                 // A check that could not be made carries a failureReason; this loop just asks again.
-                if let row = try? await VeyraWallet.shared.tokenisation
+                if let row = try? await VeyraWallet.shared
                     .refreshTransactionStatus(transactionHash: hash).value,
                     // The row stays PENDING until the merchant charges — only a final status
                     // settles the display; anything else keeps the QR up and polling.

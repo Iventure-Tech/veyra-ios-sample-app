@@ -87,7 +87,7 @@ struct ScanToPayView: View {
         // On-device verification (pinned gateway key + expiry): a rejection must never reach
         // the confirm screen — surface the reason and keep scanning.
         do {
-            switch try VeyraWallet.shared.tokenisation.inspectScannedQr(payload) {
+            switch try VeyraWallet.shared.inspectScannedQr(payload) {
             case .verified(let payment):
                 scanRejection = nil
                 withAnimation { stage = .confirming(payment) }
@@ -170,7 +170,7 @@ struct ScanToPayView: View {
         // error if the customer cancels or it fails.
         withAnimation { stage = .paying(payment) }
         do {
-            let outcome = try await VeyraWallet.shared.tokenisation.payScannedContext(payment)
+            let outcome = try await VeyraWallet.shared.payScannedContext(payment)
             // NOT_SENT: nothing was sent — stay on confirm with the reason and let the customer pay
             // the same QR again once it is fixed (cancelled sheet, card needs refreshing, offline…).
             if outcome.responseStatus == VeyraResponseStatus.notSent {
@@ -223,7 +223,7 @@ struct ScanToPayView: View {
 
     /// The cancel answers at once; the payment itself still delivers its own outcome to `pay`.
     private func cancelPayment(merchantOrderID: String) {
-        switch VeyraWallet.shared.tokenisation.cancelPayment(merchantOrderID: merchantOrderID) {
+        switch VeyraWallet.shared.cancelPayment(merchantOrderID: merchantOrderID) {
         case .cancelled:
             // `pay` receives NOT_SENT / CANCELLED and leaves the screen.
             break

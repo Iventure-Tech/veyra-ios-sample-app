@@ -177,7 +177,7 @@ struct AddCardView: View {
         banksState = .loading
         do {
             let trimmed = accountNumber.trimmingCharacters(in: .whitespaces)
-            let list = try await VeyraWallet.shared.tokenisation.banks(
+            let list = try await VeyraWallet.shared.banks(
                 accountNumber: trimmed.isEmpty ? nil : trimmed
             )
             // A read answers an outcome: no banks comes with the reason (offline above all).
@@ -206,13 +206,13 @@ struct AddCardView: View {
         eligibility = nil
         eligibilityError = nil
         do {
-            let response = try await VeyraWallet.shared.tokenisation.verifyAccount(
+            let response = try await VeyraWallet.shared.verifyAccount(VerifyAccountParams(
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
                 walletAccountID: trimmed(email),
                 accountHolderName: trimmed(accountName),
                 accountNumberSource: "MANUAL" // the account number was keyed in by the user
-            )
+            ))
             // Branch on the status; show the reason (the issuer's, or why it never reached Veyra).
             let reason = response.responseStatusReason.map { " (\($0))" } ?? ""
             eligibility = "\(response.responseStatus ?? "unknown")\(reason)\(response.message.map { " — \($0)" } ?? "")"
@@ -237,24 +237,24 @@ struct AddCardView: View {
             // APPROVE + TRUSTED/HIGHLY_TRUSTED + GOOD_ACTIVITY_HISTORY, MANUAL entry, and the
             // entered customer id as the consumer identifier. These are the app's calls to make —
             // the SDK never assumes them.
-            let r = try await VeyraWallet.shared.tokenisation.digitise(
+            let r = try await VeyraWallet.shared.digitise(DigitiseParams(
                 accountNumber: accountNumber.trimmingCharacters(in: .whitespaces),
                 institutionCode: selectedInstitutionCode,
-                walletAccountID: trimmed(email),
                 accountHolderName: trimmed(accountName),
+                walletAccountID: trimmed(email),
                 emailAddress: trimmed(email),
                 recommendation: .approve,
-                mobileNumber: user.mobileNumber,
+                consumerIdentifier: trimmed(customerID),
                 bvn: trimmed(bvn),
                 accountHolderAddress: user.fullAddress,
+                mobileNumber: user.mobileNumber,
+                clientRequestID: requestID,
                 accountNumberSource: "MANUAL",
-                consumerIdentifier: trimmed(customerID),
                 deviceScore: .trusted,
                 accountScore: .highlyTrusted,
                 recommendationReasons: [.goodActivityHistory],
-                bankName: selectedBankName,
-                clientRequestID: requestID
-            )
+                bankName: selectedBankName
+            ))
             // Cancelled before anything was sent: NOT_SENT / CANCELLED — close the screen.
             if r.responseStatus == VeyraResponseStatus.notSent && r.responseStatusReason == "CANCELLED" {
                 presentationMode.wrappedValue.dismiss()
@@ -279,7 +279,7 @@ struct AddCardView: View {
             presentationMode.wrappedValue.dismiss()   // nothing running: just close
             return
         }
-        switch VeyraWallet.shared.tokenisation.cancelDigitise(clientRequestID: clientRequestID) {
+        switch VeyraWallet.shared.cancelDigitise(clientRequestID: clientRequestID) {
         case .cancelled:
             // The digitise ends NOT_SENT / CANCELLED; the await above closes the screen.
             break

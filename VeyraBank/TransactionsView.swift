@@ -57,11 +57,11 @@ struct TransactionsView: View {
         loading = true
         defer { loading = false }
         history = (try? await VeyraWallet.shared
-            .getTransactions(tokenUniqueReference: tokenUniqueReference, limit: 50)) ?? []
+            .transactions(tokenUniqueReference: tokenUniqueReference, limit: 50)) ?? []
         var receipts: [String: TransactionReceipt] = [:]
         for tx in history {
             guard let hash = tx.transactionHash else { continue }
-            if let r = try? await VeyraWallet.shared.tokenisation.receipt(forTransactionHash: hash) {
+            if let r = try? await VeyraWallet.shared.receiptForTransaction(hash) {
                 receipts[hash] = r
             }
         }
@@ -70,7 +70,7 @@ struct TransactionsView: View {
 
     private func reconcileThenLoad() async {
         // Settle any PENDING rows (CPM QRs are offline) then refresh the list.
-        try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
+        try? await VeyraWallet.shared.reconcilePendingTransactions()
         await load()
     }
 

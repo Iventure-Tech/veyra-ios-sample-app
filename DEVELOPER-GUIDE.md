@@ -96,7 +96,12 @@ The package includes a prebuilt binary that Xcode downloads and checksum-verifie
 ### `VeyraSDK` (combined apps)
 
 ```swift
-try VeyraSDK.configure(customerID: signedInCustomer, provider: provider, softpos: softposConfig, wallet: walletConfig)
+let sdk = try VeyraSDK.configure(
+    customerID: signedInCustomer,
+    config: VeyraSDKConfiguration(softpos: softposConfig, wallet: walletConfig),
+    provider: provider)
+let wallet = try sdk.wallet       // VeyraWallet.shared
+let softpos = try sdk.softpos     // VeyraSoftPOS.shared
 
 // when the customer logs out:
 VeyraSDK.signOut()
@@ -106,10 +111,11 @@ VeyraSDK.signOut()
 
 | Member | Parameters | Description |
 |--------|------------|-------------|
-| `configure(customerID:provider:softpos:wallet:)` | The signed-in customer's id, your one provider (shared by both SDKs — see [Connecting to Veyra](#connecting-to-veyra)) and both member configurations | **Throws** (`.invalidConfiguration(message:)` when the provider is unusable). Configures both SDKs for that customer, plus the exclusive-mode arbiter. **Call at every launch** — the SDK never remembers who is signed in. The process starts **inert**; safe to call again (reconfigures, stays inert). A different customer stops the previous customer's work in both SDKs. `customerID` must not be blank (a blank one throws `.invalidConfiguration`). The wallet sends it to Veyra on its card requests (add card, eligibility, activation) so support can find the customer; SoftPOS never sends it, and device logs only ever show it masked. |
+| `configure(customerID:config:provider:)` | The signed-in customer's id, both member configurations as a `VeyraSDKConfiguration(softpos:wallet:)`, and your one provider (shared by both SDKs — see [Connecting to Veyra](#connecting-to-veyra)). Same order as Android and React Native | Returns `VeyraSDK.shared` (`@discardableResult`). **Throws** (`.invalidConfiguration(message:)` when the provider is unusable). Configures both SDKs for that customer, plus the exclusive-mode arbiter. **Call at every launch** — the SDK never remembers who is signed in. The process starts **inert**; safe to call again (reconfigures, stays inert). A different customer stops the previous customer's work in both SDKs. `customerID` must not be blank (a blank one throws `.invalidConfiguration`). The wallet sends it to Veyra on its card requests (add card, eligibility, activation) so support can find the customer; SoftPOS never sends it, and device logs only ever show it masked. |
 | `signOut()` | — | Static. The customer has logged out: both member SDKs stop everything they run for them and drop every observer registration. Their cards, merchant and history stay on the device for when they sign in again. |
 | `shared` | — | The singleton. |
-| `currentMode` | — | The current exclusive mode (`VeyraMode.none` / `.softpos` / `.wallet`). Read-only observation for UI state — the mode itself is entirely SDK-managed. A throwing property (`get throws`): read it with `try` — it throws `VeyraSDKError.notConfigured` before `VeyraSDK.configure(...)`. The sample reads it as `(try? VeyraSDK.shared.currentMode) ?? .none`. |
+| `wallet` / `softpos` | — | The member SDKs (`VeyraWallet.shared` / `VeyraSoftPOS.shared`), as Android's `VeyraSdk.wallet` / `.softpos` and RN's `Veyra.wallet` / `.softpos`. Throwing properties: `VeyraSDKError.notConfigured` before `configure`. |
+| `currentMode()` | — | The current exclusive mode (`VeyraMode.none` / `.softpos` / `.wallet`). Read-only observation for UI state — the mode itself is entirely SDK-managed. **Throws** `VeyraSDKError.notConfigured` before `VeyraSDK.configure(...)`. The sample reads it as `(try? VeyraSDK.shared.currentMode()) ?? .none`. |
 
 In a standalone single-product app (only `VeyraSoftPOS` *or* only `VeyraWallet`), configure that product directly and skip `VeyraSDK` entirely.
 
@@ -117,15 +123,14 @@ In a standalone single-product app (only `VeyraSoftPOS` *or* only `VeyraWallet`)
 
 ```swift
 // standalone; combined apps configure via VeyraSDK
-try VeyraSoftPOS.configure(configuration, customerID: signedInCustomer, provider: provider)
-let softpos = VeyraSoftPOS.shared
+let softpos = try VeyraSoftPOS.configure(customerID: signedInCustomer, config: configuration, provider: provider)
 ```
 
 **Members:**
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraSoftPOSError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). The merchant and its transactions are kept per customer: the same customer again changes nothing; a different customer stops the previous customer's watches and opens the new customer's merchant. `customerID` must not be blank (a blank one throws `.invalidConfiguration`); SoftPOS never sends it off the device. |
+| `configure(customerID:config:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. Returns `VeyraSoftPOS.shared` (`@discardableResult`). **Throws** `VeyraSoftPOSError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). The merchant and its transactions are kept per customer: the same customer again changes nothing; a different customer stops the previous customer's watches and opens the new customer's merchant. `customerID` must not be blank (a blank one throws `.invalidConfiguration`); SoftPOS never sends it off the device. |
 | `signOut()` | Static. The customer has logged out: stops every merchant watch and drops every observer registration. Their merchant and transactions stay on the device. Until the next `configure` every call throws `VeyraSoftPOSError.notSignedIn`. |
 | `shared` | The singleton. |
 | `storedMerchantData(customerID:)` / `isMerchantRegistered(customerID:)` | Static, and usable **before `configure`**: that customer's stored merchant (or `nil`) and whether it is complete enough to take payments. Nothing is signed in, started or claimed — gate your Home screen's "Get paid" entry on it, and configure on the payment screen itself. |
@@ -139,20 +144,19 @@ listed in [SoftPOS — accepting payments](#softpos-api).
 
 ```swift
 // standalone; combined apps configure via VeyraSDK
-try VeyraWallet.configure(configuration, customerID: signedInCustomer, provider: provider)
-let tokenisation = VeyraWallet.shared.tokenisation
+let wallet = try VeyraWallet.configure(customerID: signedInCustomer, config: configuration, provider: provider)
 ```
 
 **Members:**
 
 | Member | Description |
 |--------|-------------|
-| `configure(_:customerID:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. **Throws** `VeyraWalletError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). Cards, keys, history and receipts are kept per customer: the same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. `customerID` must not be blank (a blank one throws `.invalidConfiguration`). It is sent to Veyra on the wallet's card requests (add card, eligibility, activation) so support can find the customer; device logs only ever show it masked. |
+| `configure(customerID:config:provider:)` | Configure the SDK for the customer your app has signed in, reaching Veyra through `provider`. Returns `VeyraWallet.shared` (`@discardableResult`). **Throws** `VeyraWalletError.invalidConfiguration` when the provider is unusable or is of a different kind from the one already in use. **Call at every launch**, before any service use (subsequent calls reconfigure). Cards, keys, history and receipts are kept per customer: the same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. `customerID` must not be blank (a blank one throws `.invalidConfiguration`). It is sent to Veyra on the wallet's card requests (add card, eligibility, activation) so support can find the customer; device logs only ever show it masked. |
 | `signOut()` | Static. The customer has logged out: stops everything the wallet runs for them (key top-ups, status syncs, history sweeps) and drops every observer registration. Their cards, keys, history and receipts stay on the device. Until the next `configure` every call throws `VeyraWalletError.notSignedIn`. |
 | `shared` | The singleton. |
-| `tokenisation` | The wallet service — bank lookup, eligibility, digitise, activation, cards, payments, history, receipts — plus `cancelDigitise(clientRequestID:)` and `cancelPayment(merchantOrderID:)` (scan to pay), which cancel a call while it is still on the phone (see [Cancelling a call](#cancelling-a-call)). |
-| `getTransactions(tokenUniqueReference:limit:)` | The card's transaction history, most recent first (`limit` default 50). Local read. See [`getTransactions`](#gettransactions). |
-| `openPaySession()` / `closePaySession()` / `isPaySessionOpen` | The tap-to-pay pay session — the same three calls as Android and React Native, so one integration runs everywhere. iPhone cannot pay by tap, so `openPaySession()` always answers `PaySessionResult` `FAILED` / `NFC_UNAVAILABLE` (the same answer an Android phone without NFC gives — offer QR), `closePaySession()` does nothing, and `isPaySessionOpen` is `false`. |
+| *wallet operations* | Every wallet operation is a method on `VeyraWallet.shared` — bank lookup, eligibility, digitise, activation, tokens, payments, history, receipts, observers — plus `cancelDigitise(clientRequestID:)` and `cancelPayment(merchantOrderID:)` (scan to pay), which cancel a call while it is still on the phone (see [Cancelling a call](#cancelling-a-call)). The guide's examples hold it as `let wallet = VeyraWallet.shared`. The same operations, on the same owner, as Android's `VeyraWalletSdk` and React Native's `wallet`; Swift drops the `get` prefix (`tokens()` where the others say `getTokens()`). |
+| `transactions(tokenUniqueReference:limit:)` | The card's transaction history, most recent first (`limit` default 50). Local read. See [`transactions`](#transactions). |
+| `openPaySession()` / `closePaySession()` / `isPaySessionOpen()` | The tap-to-pay pay session — the same three calls as Android and React Native, so one integration runs everywhere. iPhone cannot pay by tap, so `openPaySession()` always answers `PaySessionResult` `FAILED` / `NFC_UNAVAILABLE` (the same answer an Android phone without NFC gives — offer QR), `closePaySession()` does nothing, and `isPaySessionOpen()` returns `false`. |
 | `paymentApplicationInstanceID()` | This install's SDK-generated `payment_application_instance_id` (`VYRA` + 32 hex chars): minted on first use, persisted install-scoped (never backed up), new on reinstall. Read-only. |
 
 ---
@@ -252,15 +256,16 @@ let provider = MyAssertionProvider(bank: bankAPI)          // or MyProxyProvider
 do {
     try VeyraSDK.configure(
         customerID: signedInCustomer,
-        provider: provider,
-        softpos: .init(environment: .test, paymentAppProviderID: providerID),
-        wallet: .init(environment: .test, paymentAppProviderID: providerID,
-                      tokenRequestorID: requestorID, appleTeamID: teamID))
+        config: VeyraSDKConfiguration(
+            softpos: .init(environment: .test, paymentAppProviderID: providerID),
+            wallet: .init(environment: .test, paymentAppProviderID: providerID,
+                          tokenRequestorID: requestorID, appleTeamID: teamID)),
+        provider: provider)
 } catch {
     // .invalidConfiguration(message:) names the problem — a setup error, fix the provider.
 }
-// …or standalone: try VeyraSoftPOS.configure(softposConfig, customerID:, provider:)
-//                  try VeyraWallet.configure(walletConfig, customerID:, provider:)
+// …or standalone: try VeyraSoftPOS.configure(customerID:, config: softposConfig, provider:)
+//                  try VeyraWallet.configure(customerID:, config: walletConfig, provider:)
 ```
 
 The sample has no mode setting either: `AppProvider.provider()` in
@@ -500,7 +505,7 @@ There is no configuration parameter for it.
 
 A combined app is always in exactly one mode: **none**, **receiving** (SoftPOS) or **paying** (Wallet). The SDK manages this for you:
 
-- **Claims are automatic.** The SDK claims a mode at the point of use — starting a tap session claims receiving, executing a wallet payment claims paying — and releases it when the session ends or the payment completes. Backgrounding the app drops it to inert. There is no mode API to call and no `.onAppear`/`.onDisappear` choreography; `currentMode` is available read-only for UI state.
+- **Claims are automatic.** The SDK claims a mode at the point of use — starting a tap session claims receiving, executing a wallet payment claims paying — and releases it when the session ends or the payment completes. Backgrounding the app drops it to inert. There is no mode API to call and no `.onAppear`/`.onDisappear` choreography; `currentMode()` is available read-only for UI state.
 - **Starts inert, never persisted.** The mode follows your payment activity, not your screens; the app always starts with no mode active — even after being killed mid-payment.
 - **Atomic.** The outgoing capability is fully torn down before the incoming one arms. A merely-armed (untapped) tap payment is cancelled automatically on a switch; a genuinely mid-flight payment refuses the switch instead.
 
@@ -514,7 +519,9 @@ The SDK keeps **everything per customer**: the wallet's cards, payment keys, his
 
 ```swift
 // At every launch, once your app knows who is logged in:
-try VeyraSDK.configure(customerID: session.customerID, provider: provider, softpos: softposConfig, wallet: walletConfig)
+try VeyraSDK.configure(customerID: session.customerID,
+                       config: VeyraSDKConfiguration(softpos: softposConfig, wallet: walletConfig),
+                       provider: provider)
 registerObservers()            // observers belong to the signed-in customer
 
 // When the customer logs out:
@@ -525,7 +532,7 @@ VeyraSDK.signOut()
 - **Same customer again** — nothing is stopped and nothing is downloaded; calling `configure` at every launch is free.
 - **A different customer** — the previous customer's work (key top-ups, status syncs, history sweeps, merchant watches) is stopped, and the new customer's cards and merchant are opened. Nothing of the previous customer's is deleted: it is waiting for them when they sign in again.
 - **`signOut()`** stops every loop, sweep, watch and observer the SDK runs for the customer. Their cards, **payment keys**, history, receipts, merchant and transactions all **stay on the device**. Signing the same customer back in downloads nothing for cards that still have keys; a card that has none gets them in the background.
-- **Register observers again after `configure`.** Observer registrations (`observeTokenLifecycle`, `observeCardKeyState`, `observePaymentRefusals`, wallet `observeTransactionResolved`, SoftPOS `observeMerchantStatusChanged`, `observeTransactionResolved`, `observeCreditConfirmation`, …) are dropped on a customer switch and on sign-out, so one customer's events can never reach another's screens. Register them again after every `configure`.
+- **Register observers again after `configure`.** Observer registrations (`observeTokenStatusChanged`, `observeCardKeyStateChanged`, `observePaymentRefusals`, wallet `observeTransactionResolved`, SoftPOS `observeMerchantStatusChanged`, `observeTransactionResolved`, `observeCreditConfirmation`, …) are dropped on a customer switch and on sign-out, so one customer's events can never reach another's screens. Register them again after every `configure`.
 - **After `signOut()`**, every call throws `VeyraWalletError.notSignedIn` / `VeyraSoftPOSError.notSignedIn` until the next `configure`. (`.notConfigured` still means `configure` was never called in this process.) Gate your wallet and get-paid entry points on your own logged-in state.
 - **Uninstalling the app** removes every customer's data. There is no API to wipe the device for all customers.
 
@@ -1207,15 +1214,22 @@ Android and React Native keep `getX`. Observers are `observeX(_:)` with a matchi
 
 ## Wallet — making payments
 
-Everything hangs off `VeyraWallet.shared.tokenisation`; methods are `async throws`, but they throw `VeyraWalletError` only for setup mistakes; everything that happens while processing comes back as an outcome — see [Errors and outcomes](#errors-and-outcomes).
+Everything hangs off `VeyraWallet.shared` — the examples below hold it as `let wallet = VeyraWallet.shared`; methods are `async throws`, but they throw `VeyraWalletError` only for setup mistakes; everything that happens while processing comes back as an outcome — see [Errors and outcomes](#errors-and-outcomes).
 
-### Add a card (digitisation)
+### Add token
+
+| Call | What it does | Returns |
+|---|---|---|
+| `banks(accountNumber:)` | The banks a card can be added from, optionally filtered by account number | `BankList` |
+| `verifyAccount(_:)` | Checks the account can be tokenised (`VerifyAccountParams`) | `VerifyAccountResponse` |
+| `digitise(_:)` | Adds the token: tokenises the account and stores the payment material on the phone (`DigitiseParams`) | `DigitiseResult` |
+| `cancelDigitise(clientRequestID:)` | Cancels an add-token still on the phone | `CancelResult` |
 
 Flow: `banks` → `verifyAccount` → `digitise`. On success the SDK receives, decrypts and stores the payment material on-device — the card can pay immediately (`APPROVED`) or after activation (`APPROVE_REQUIRE_AUTH`).
 
 ---
 
-#### `tokenisation.banks`
+#### `banks`
 
 Fetch the supported NUBAN banks, optionally filtered by account number. Call as soon as the user finishes entering their account number so the list is ready for the bank picker.
 
@@ -1224,7 +1238,7 @@ Fetch the supported NUBAN banks, optionally filtered by account number. Call as 
 | `accountNumber` | No | 10-digit NUBAN. When supplied, returns only banks linked to that account; `nil`/blank returns all supported banks (use as the "can't find my bank" fallback). |
 
 ```swift
-let list = try await VeyraWallet.shared.tokenisation.banks(accountNumber: "1234567890")   // BankList
+let list = try await wallet.banks(accountNumber: "1234567890")   // BankList
 guard list.responseStatus == VeyraResponseStatus.approved else {
     banksState = .failed(list.responseStatusReason == "NO_NETWORK_CONNECTION"
         ? "No internet connection — connect and try again."
@@ -1238,20 +1252,22 @@ let banks = list.banks   // [Bank]: slug, name, institutionCode
 
 ---
 
-#### `tokenisation.verifyAccount`
+#### `verifyAccount`
 
 Check whether an account can be tokenised before digitising. Eligible when `responseCode == "APPROVED"`.
 
 ```swift
-let response = try await VeyraWallet.shared.tokenisation.verifyAccount(
+let response = try await wallet.verifyAccount(VerifyAccountParams(
     accountNumber: "1234567890",
     institutionCode: "000000",
     walletAccountID: "ada@example.com",
-    accountHolderName: "Ada Obi",
-    accountNumberSource: "MANUAL"
-)
+    accountHolderName: "Ada Obi",                 // optional
+    accountNumberSource: "MANUAL"                 // optional
+))
 if response.isApproved { proceedToDigitise() }
 ```
+
+`VerifyAccountParams` carries the same fields as Android's and React Native's: `accountNumber`, `institutionCode` and `walletAccountID` are required; `accountHolderName` and `accountNumberSource` are optional.
 
 `walletAccountID` is the customer's **registered email address or phone number** — a value the issuer already holds for this account, not an internal id of your own. The SDK derives a hash from it; it is not sent raw. The issuer checks that hash against its own records, so a value it does not know never matches.
 
@@ -1259,29 +1275,29 @@ if response.isApproved { proceedToDigitise() }
 
 ---
 
-#### `tokenisation.digitise`
+#### `digitise`
 
 Tokenise the account: the SDK attests the device, sends the request, and on success decrypts and stores the token material on-device. The **tokenisation recommendation is your app's business decision** — the SDK never assumes one.
 
 ```swift
-let r = try await VeyraWallet.shared.tokenisation.digitise(
+let r = try await wallet.digitise(DigitiseParams(
     accountNumber: accountNumber,
     institutionCode: institutionCode,
-    walletAccountID: "ada@example.com",
     accountHolderName: "Ada Obi",
+    walletAccountID: "ada@example.com",
     emailAddress: "ada@example.com",
     recommendation: .approve,                    // your app's risk decision — required
-    mobileNumber: mobileNumber,
+    consumerIdentifier: customerID,              // your stable id for this customer
     bvn: bvn,
     accountHolderAddress: address,
+    mobileNumber: mobileNumber,
+    clientRequestID: requestID,                  // optional: your reference, to cancel with cancelDigitise
     accountNumberSource: "MANUAL",
-    consumerIdentifier: customerID,              // your stable id for this customer
     deviceScore: .trusted,
     accountScore: .highlyTrusted,
     recommendationReasons: [.goodActivityHistory],
-    bankName: selectedBankName,                  // shown on the stored card
-    clientRequestID: requestID                   // optional: your reference, to cancel with cancelDigitise
-)
+    bankName: selectedBankName                   // shown on the stored card
+))
 // Every digitise ends with an outcome. Digitise is never PENDING: an answer that never
 // arrived is FAILED (NO_RESPONSE_RECEIVED / UPSTREAM_ERROR) — add the card again.
 switch r.responseStatus {
@@ -1297,11 +1313,25 @@ default:                                         // FAILED, or a status newer th
 }
 ```
 
+`DigitiseParams` carries the same fields, and the same required ones, as Android's and React Native's: `accountNumber`, `institutionCode`, `accountHolderName`, `walletAccountID`, `emailAddress` and `recommendation` are required; everything else is optional.
+
 `DigitiseResult`: `tokenUniqueReference`, `responseCode` (the issuer's decision: `APPROVED`, `APPROVE_REQUIRE_AUTH`, `DECLINED`), `responseStatus` (`APPROVED` · `DECLINED` · `FAILED` · `NOT_SENT` — **never `PENDING`**), `responseStatusReason` (the cause — present on `APPROVE_REQUIRE_AUTH` too, where it says why step-up is needed), `message`, `activationMethods` (`medium` + masked `contact`), `tokenStored` (provisioning material decrypted and stored), `isApproved`, `requiresActivation`. Add-card has no reference of its own: after `FAILED` or `NOT_SENT` simply digitise again. `clientRequestID` (optional) is your reference for one attempt: pass one and `cancelDigitise(clientRequestID:)` can cancel the add-card while it is still on the phone ([Cancelling a call](#cancelling-a-call)); a cancelled attempt ends `NOT_SENT` / `CANCELLED`.
+
+#### `cancelDigitise`
+
+Set `clientRequestID` in `DigitiseParams`, then `cancelDigitise(clientRequestID:)` with the same value cancels the add-token while it is still on the phone. It answers at once with a `CancelResult` and never throws; a cancelled `digitise` ends `NOT_SENT` / `CANCELLED`. See [Cancelling a call](#cancelling-a-call).
 
 ---
 
 ### Activation
+
+| Call | What it does | Returns |
+|---|---|---|
+| `requestActivationCode(tokenUniqueReference:medium:reason:)` | Sends an activation code to the masked email or phone | `ActivationCodeResponse` |
+| `activate(tokenUniqueReference:activationCode:)` | Submits the code the customer received | `ActivateResponse` |
+| `observeActivation(tokenUniqueReference:onActivated:onTimeout:onError:)` | Watches an out-of-band activation (polls every 10 s, up to 5 minutes) | — (callbacks, on the main thread) |
+| `pauseActivationObserver` / `resumeActivationObserver` / `stopActivationObserver(tokenUniqueReference:)` | Pauses on background, resumes on return, stops when the screen goes | — |
+| `hasActivationObserver(tokenUniqueReference:)` | Whether an activation observer is still running for the token | `Bool` |
 
 When digitise returns `APPROVE_REQUIRE_AUTH`, the response carries the issuer's **activation methods**. Branch on each entry's `medium`:
 
@@ -1321,12 +1351,12 @@ OTP delivery for the `MASKED_EMAIL` / `MASKED_MOBILE_PHONE` methods.
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `tokenUniqueReference` | **Mandatory** | The card being activated. |
-| `method` | **Mandatory** | The chosen medium: `.maskedEmail` / `.maskedMobilePhone`. |
+| `medium` | **Mandatory** | The chosen `ActivationMedium`: `.maskedEmail` / `.maskedMobilePhone`. |
 | `reason` | **Mandatory** (default `.addCard`) | `.addCard`, `.checkAccountEligibility` or `.other`. |
 
 ```swift
-let response = try await VeyraWallet.shared.tokenisation.requestActivationCode(
-    tokenUniqueReference: ref, method: .maskedMobilePhone, reason: .addCard)
+let response = try await wallet.requestActivationCode(
+    tokenUniqueReference: ref, medium: .maskedMobilePhone, reason: .addCard)
 ```
 
 `ActivationCodeResponse`: `responseStatus`, `responseStatusReason`, `tokenUniqueReference`, `expirationDateTime` (ISO-8601 — drive your countdown from it), `status` (`SUCCESS` / `FAILURE`), `message`, `failureCode` (typed `ActivationFailureCode`, nil on success) + `failureCodeRaw`. **Branch on `responseStatus` first:**
@@ -1346,7 +1376,7 @@ Codes are limited-attempt and rate-limited — see [Activation — `failureCode`
 Submit the code the customer received. Activated when `responseStatus == "APPROVED"`.
 
 ```swift
-let response = try await VeyraWallet.shared.tokenisation.activate(
+let response = try await wallet.activate(
     tokenUniqueReference: ref, activationCode: code)
 switch response.responseStatus {
 case VeyraResponseStatus.approved: navigateToWallet()
@@ -1381,10 +1411,10 @@ For the out-of-band methods (call centre / website / issuer app) the activation 
 | `onTimeout` | After 5 minutes without activation — show a fallback message (the SDK keeps checking in the background thereafter). |
 | `onError` | Optional — each failed check (polling continues). |
 
-Wire the lifecycle: `pauseActivationObserver(ref)` when the screen backgrounds, `resumeActivationObserver(ref)` on return (the timeout clock keeps running while paused — if it lapsed, `onTimeout` fires immediately), `stopActivationObserver(ref)` when the screen is dismissed.
+Wire the lifecycle: `pauseActivationObserver(ref)` when the screen backgrounds, `resumeActivationObserver(ref)` on return (the timeout clock keeps running while paused — if it lapsed, `onTimeout` fires immediately), `stopActivationObserver(ref)` when the screen is dismissed. `hasActivationObserver(tokenUniqueReference:)` says whether one is still running for the card — `true` from `observeActivation` until it activates, times out or is stopped (a paused observer is still running).
 
 ```swift
-try VeyraWallet.shared.tokenisation.observeActivation(
+try wallet.observeActivation(
     tokenUniqueReference: ref,
     onActivated: { Task { await reload() } },
     onTimeout:   { hint = "Still pending — we'll keep checking" }
@@ -1395,15 +1425,26 @@ try VeyraWallet.shared.tokenisation.observeActivation(
 
 ---
 
-### Cards & tokens
+### Tokens
 
-#### `tokenisation.tokens`
+| Call | What it does | Returns |
+|---|---|---|
+| `tokens()` | Every token in this wallet — local read | `[StoredCard]` |
+| `activeToken()` | The token payments use, or `nil` | `StoredCard?` |
+| `setActiveToken(_:)` | Selects the token payments use | `CardSelection` |
+| `token(_:)` | One token by its `tokenUniqueReference`, or `nil` when it is not in this wallet | `StoredCard?` |
+| `tokenStatus(tokenUniqueReference:)` | The token's status at the token service | `TokenStatusResult` |
+| `deactivateToken(_:)` | Removes the token — at the backend first, then from the phone | `TokenStatusUpdateResponse` |
+| `paymentApplicationInstanceID()` | This install's SDK-generated instance id | `String` |
+
+#### `tokens` / `activeToken` / `token`
 
 The wallet's cards, from the SDK's local registry — no network call.
 
 ```swift
-let cards = try await VeyraWallet.shared.tokenisation.tokens()   // [StoredCard]
-let active = try await VeyraWallet.shared.tokenisation.activeToken
+let cards = try await wallet.tokens()                       // [StoredCard]
+let active = try await wallet.activeToken()                 // StoredCard? — the one payments use
+let card = try await wallet.token(tokenUniqueReference)     // StoredCard? — nil when not in this wallet
 ```
 
 `StoredCard`: `tokenUniqueReference`, `panLastFour`, `maskedPAN`, `expiry` (`MM/YY`), `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `accountHolderName`, `bankName`, `status`, `requiresActivation`, `isActive`, `requiresOnline`, `deviceNotBound`.
@@ -1412,7 +1453,7 @@ let active = try await VeyraWallet.shared.tokenisation.activeToken
 
 **`deviceNotBound`** — `true` (default `false`) when the backend refused this card's payment keys because the card was added on a **different device** — or on this phone before the app was reinstalled. Payment keys are issued for a card only to the device it was added on; on this refusal the SDK remembers it for that card, stops all automatic key requests for it (top-up, refresh, maintenance), and `requiresOnline` is always `false` while it is set. Going online does not help, and neither does a smaller amount. Render the card unavailable and tell the user to **add this card again on this phone** — not to connect. The flag clears only when the card is removed.
 
-#### Handling card states in your UI
+#### Handling token states in your UI
 
 A card is not simply "there or not" — it can be awaiting activation, frozen for a refresh, or suspended server-side. Derive one display state per card, in this precedence order, every time you render the wallet:
 
@@ -1432,7 +1473,7 @@ Two rules make this robust:
 The sample's card stack + gating:
 
 ```swift
-let cards = try await VeyraWallet.shared.tokenisation.tokens()
+let cards = try await wallet.tokens()
 
 // Per-card rendering:
 @ViewBuilder func cardFace(_ card: StoredCard) -> some View {
@@ -1472,7 +1513,7 @@ func activeCardBlocked(_ cards: [StoredCard]) -> Bool {
 
 A deactivated card needs no rendering rule — the SDK removes it from the list entirely (the wipe happens automatically when a status sync sees `DEACTIVATED`).
 
-#### `tokenisation.setActiveToken`
+#### `setActiveToken`
 
 Select the card payments use (at most one card is active). The selection happens on the phone —
 nothing is sent — and it answers a `CardSelection`: `APPROVED` (the card is now the one payments
@@ -1480,7 +1521,7 @@ use), or `FAILED` / `CARD_NOT_FOUND` when no card with that reference is in this
 [setup error](#setup-errors--thrown) throws.
 
 ```swift
-let selection = try await VeyraWallet.shared.tokenisation.setActiveToken(tokenUniqueReference)
+let selection = try await wallet.setActiveToken(tokenUniqueReference)
 if !selection.selected {                          // FAILED / CARD_NOT_FOUND
     actionError = selection.message ?? selection.responseStatusReason
 }
@@ -1489,12 +1530,8 @@ if !selection.selected {                          // FAILED / CARD_NOT_FOUND
 `CardSelection`: `responseStatus`, `responseStatusReason`, `message`, plus `selected: Bool` (the same
 fact as `responseStatus == "APPROVED"`). The result is `@discardableResult`.
 
-**Tap-to-pay is Android-only** — on iOS the wallet pays by QR (Apple restricts card emulation). The
-pay-session calls (`openPaySession()`, `closePaySession()`, `isPaySessionOpen`) still exist with the
-same names as on Android, so shared code needs no platform check: opening answers `FAILED` /
-`NFC_UNAVAILABLE`, which you handle as on an Android phone without NFC — show the QR rails.
 
-#### `tokenisation.deactivateToken`
+#### `deactivateToken`
 
 | Method | Behaviour |
 |---|---|
@@ -1507,7 +1544,7 @@ Use `deactivateToken` for the user's "remove card" action. Check the outcome: if
 `APPROVED`, **show the reason and let the customer try again** — don't wipe the card locally anyway.
 
 ```swift
-let r = try await VeyraWallet.shared.tokenisation.deactivateToken(tokenUniqueReference)
+let r = try await wallet.deactivateToken(tokenUniqueReference)
 if r.responseStatus == VeyraResponseStatus.approved {
     await reload()                                   // card gone, next one promoted
 } else {
@@ -1519,22 +1556,103 @@ if r.responseStatus == VeyraResponseStatus.approved {
 leaves the token live at the backend with nothing on the device to show for it, and the customer
 sees a card they can no longer manage.
 
-#### `tokenStatus` · card status sync
+#### `tokenStatus` · token status sync
 
 `tokenStatus(tokenUniqueReference:)` returns a `TokenStatusResult` — a read, never `PENDING`: `APPROVED` with `tokenStatus` (`"ACTIVE"`, `"SUSPENDED"`…), or the reason the check could not be made (`responseStatusReason`, e.g. `NO_NETWORK_CONNECTION`, `TOKEN_NOT_FOUND`), plus `message`. You rarely need it: the SDK syncs each card's server status automatically (on scene-active and around payments) — a suspended card becomes non-payable until a later sync sees it active again, and a deactivated card is removed from the wallet. Reflect it in UI from `StoredCard.status` / payment refusals rather than polling yourself.
 
+#### `paymentApplicationInstanceID`
+
+This install's SDK-generated `payment_application_instance_id` (`VYRA` + 32 hex chars): minted on first use, persisted install-scoped (never backed up), new on reinstall. Read-only — the app cannot set or regenerate it. Throws only a setup error.
+
 ---
 
-### Scan to pay (merchant QR)
+### Tap to pay
+
+| Call | What it does | Returns |
+|---|---|---|
+| `openPaySession()` | Arms tap-to-pay — on iOS always answers `FAILED` / `NFC_UNAVAILABLE` | `PaySessionResult` |
+| `closePaySession()` | Disarms tap-to-pay — does nothing on iOS | — |
+| `isPaySessionOpen()` | Whether tap-to-pay is armed — always `false` on iOS | `Bool` |
+
+**Wallet tap-to-pay is not available on iOS.** Apple restricts card emulation, so an iPhone wallet pays by QR only (see [QR pay](#qr-pay)). The three calls exist so one integration runs on every platform: on Android the same calls arm and disarm the phone for a tap.
+
+Shared code needs no platform check: handle `openPaySession()`'s `FAILED` / `NFC_UNAVAILABLE` as on
+an Android phone without NFC — show the QR rails.
+
+---
+
+### QR pay
+
+| Call | What it does | Returns |
+|---|---|---|
+| `showQrToPay(amountMinorUnits:onExpired:)` | Renders a payment QR for the active token; `onExpired` fires once when it lapses | `PaymentQr` |
+| `cancelQrExpiry()` | Stops the shown QR's expiry watch | — |
+| `inspectScannedQr(_:)` | Verifies a scanned merchant QR on the phone | `ScanInspection` |
+| `payScannedContext(_:)` | Pays a verified merchant QR with the active token | `PaymentOutcome` |
+| `cancelPayment(merchantOrderID:)` | Cancels a scan-to-pay still on the phone | `CancelResult` |
+
+#### Show QR to pay (customer-presented)
+
+The customer keys nothing at the till: your app asks the amount first (the merchant states it) and renders a **dynamic payment QR** — the SDK handles the authentication with the amount cryptographically bound inside. Fully offline — the merchant's SoftPOS submits the payment; the outcome lands in history via reconciliation.
+
+##### `showQrToPay` + `cancelQrExpiry`
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `amountMinorUnits` | **Mandatory** | The merchant-stated amount — bound into the QR's cryptogram; the merchant's scan charges exactly this or fails. |
+| `onExpired` | Optional | Fired **once, on the main thread**, when the QR lapses — blank or replace the code (a dimmed QR is still scannable). A new render supersedes the watch; `cancelQrExpiry()` stops it (call on screen teardown). |
+
+The SDK presents the authentication sheet itself — **one gesture per QR**; regenerating after expiry is a fresh payment attempt and asks again.
+
+```swift
+let qr = try await wallet.showQrToPay(amountMinorUnits: amount) {
+    expired = true       // blank the code
+}
+// APPROVED (a QR was made) or NOT_SENT with the reason none could be made. Nothing is sent either way.
+guard qr.responseStatus == VeyraResponseStatus.approved, let payload = qr.payload else {
+    switch qr.responseStatusReason {
+    case "AUTH_CANCELLED": break                 // dismissed the sheet — back to amount entry, no banner
+    case "DEVICE_NOT_BOUND": errorMessage = "Remove this card and add it again on this phone"
+    default: errorMessage = qr.message ?? qr.responseStatusReason   // ONLINE_REQUIRED, AMOUNT_EXCEEDS_CARD_LIMIT, …
+    }
+    return
+}
+renderQr(payload)
+// .onDisappear: wallet.cancelQrExpiry()
+```
+
+The result (`PaymentQr`): `responseStatus` — `APPROVED` or `NOT_SENT` (showing a QR sends nothing, so there is no other status), `responseStatusReason` on `NOT_SENT` (`AUTH_CANCELLED`, `AUTH_FAILED`, `AUTH_UNAVAILABLE`, `ONLINE_REQUIRED`, `AMOUNT_EXCEEDS_CARD_LIMIT`, `TOKEN_NOT_ACTIVE`, `DEVICE_NOT_BOUND`, `NO_ACTIVE_CARD`, `CARD_CANNOT_SHOW_QR`, `INVALID_REQUEST`), `message`, `payload` (**render as the QR**; `nil` unless `APPROVED`), `tokenUniqueReference`, `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. The payment's own outcome arrives later, on the history row. To show "paid ✓" on the customer's screen, check **this QR's own payment** while the QR is up: call [`refreshTransactionStatus`](#refreshtransactionstatus) with its `transactionHash` — one request per check — and stop on a final status:
+
+```swift
+guard let hash = qr.transactionHash else { return }
+while !Task.isCancelled {
+    try? await Task.sleep(nanoseconds: 3_000_000_000)
+    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
+    let row = try? await wallet
+        .refreshTransactionStatus(transactionHash: hash).value
+    switch row?.authorizationStatus {
+    case "APPROVED": onSettled(approved: true); return
+    case "DECLINED", "FAILED": onSettled(approved: false); return
+    default: continue   // PENDING (the QR's own row exists from the moment it is shown), RETRY, or not found yet: keep the QR up
+    }
+}
+```
+
+The QR's history row is created `PENDING` as soon as the QR is shown, so finding the row is not
+the answer — only a final status is. **Don't loop `reconcilePendingTransactions` here:** it asks
+about every open payment on the device back-to-back, so on a short loop it gets the wallet
+throttled (`429`) by the gateway.
+
+#### Scan to pay (merchant QR)
 
 The customer scans a merchant's get-paid QR: **inspect** (on-device verification) → confirm screen → **authenticate** (biometric) → **pay**.
 
-#### `inspectScannedQr`
+##### `inspectScannedQr`
 
 Synchronous, on-device verification of the scanned payload — gateway signature against the SDK's pinned keys, plus expiry. **Only a verified result may reach your confirm screen; every rejection must end the flow.**
 
 ```swift
-switch try VeyraWallet.shared.tokenisation.inspectScannedQr(payload) {
+switch try wallet.inspectScannedQr(payload) {
 case .verified(let payment): showConfirm(payment)            // VerifiedPayment
 case .rejected(let reason, _): showRejected(reason)          // .malformed/.missingSignature/.unknownKey/.badSignature/.expired
 }
@@ -1542,7 +1660,7 @@ case .rejected(let reason, _): showRejected(reason)          // .malformed/.miss
 
 The verified context carries `merchantName`, `merchantCity`, `amount` (display string), `amountMinorUnits`, `currencyNumeric`, `txRef`, `expiryEpochSeconds` — render these on the confirm screen; the customer never keys an amount — and `merchantOrderID`, the merchant's order ID signed into the QR, which `cancelPayment(merchantOrderID:)` names to cancel the payment while it is still on the phone (`nil` on a QR that carries none: disable Cancel while it is paying).
 
-#### Device authentication (CDCVM) — the SDK asks, you don't
+##### Device authentication (CDCVM) — the SDK asks, you don't
 
 **There is no authentication method to call.** `payScannedContext` and `showQrToPay` present the
 system `LocalAuthentication` sheet themselves — Face ID or Touch ID, falling back to the device
@@ -1583,7 +1701,7 @@ VeyraWalletConfiguration(
 
 > **There is no tap-to-pay on iOS**, so unlike Android this is the only place CDCVM applies.
 
-#### `payScannedContext`
+##### `payScannedContext`
 
 Pay the verified context with the wallet's **active card**. The SDK presents the authentication
 sheet itself first (above). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
@@ -1595,7 +1713,7 @@ sheet itself first (above). Whatever the gateway states — approved, declined, 
 **`RETRY` also means nothing was charged** — the gateway received the payment but never sent it to the bank. Show the reason: for `QR_EXPIRED` or `AMOUNT_MISMATCH` ask the merchant for a fresh code; otherwise (`NAME_ENQUIRY_FAILED`, `ISSUER_SWITCH_NOT_AVAILABLE`, …) the customer can try again.
 
 ```swift
-let outcome = try await VeyraWallet.shared.tokenisation.payScannedContext(payment)
+let outcome = try await wallet.payScannedContext(payment)
 switch outcome.responseStatus {
 case VeyraResponseStatus.approved: showApproved(outcome.message)
 case VeyraResponseStatus.declined, VeyraResponseStatus.failed:
@@ -1610,109 +1728,85 @@ default: showPending(outcome.responseStatusReason ?? outcome.responseCode)
 }
 ```
 
----
+##### `cancelPayment`
 
-### Show QR to pay (customer-presented)
-
-The customer keys nothing at the till: your app asks the amount first (the merchant states it) and renders a **dynamic payment QR** — the SDK handles the authentication with the amount cryptographically bound inside. Fully offline — the merchant's SoftPOS submits the payment; the outcome lands in history via reconciliation.
-
-#### `showQrToPay` + `cancelQrExpiry`
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `amountMinorUnits` | **Mandatory** | The merchant-stated amount — bound into the QR's cryptogram; the merchant's scan charges exactly this or fails. |
-| `onExpired` | Optional | Fired **once, on the main thread**, when the QR lapses — blank or replace the code (a dimmed QR is still scannable). A new render supersedes the watch; `cancelQrExpiry()` stops it (call on screen teardown). |
-
-The SDK presents the authentication sheet itself — **one gesture per QR**; regenerating after expiry is a fresh payment attempt and asks again.
-
-```swift
-let qr = try await VeyraWallet.shared.tokenisation.showQrToPay(amountMinorUnits: amount) {
-    expired = true       // blank the code
-}
-// APPROVED (a QR was made) or NOT_SENT with the reason none could be made. Nothing is sent either way.
-guard qr.responseStatus == VeyraResponseStatus.approved, let payload = qr.payload else {
-    switch qr.responseStatusReason {
-    case "AUTH_CANCELLED": break                 // dismissed the sheet — back to amount entry, no banner
-    case "DEVICE_NOT_BOUND": errorMessage = "Remove this card and add it again on this phone"
-    default: errorMessage = qr.message ?? qr.responseStatusReason   // ONLINE_REQUIRED, AMOUNT_EXCEEDS_CARD_LIMIT, …
-    }
-    return
-}
-renderQr(payload)
-// .onDisappear: VeyraWallet.shared.tokenisation.cancelQrExpiry()
-```
-
-The result (`PaymentQr`): `responseStatus` — `APPROVED` or `NOT_SENT` (showing a QR sends nothing, so there is no other status), `responseStatusReason` on `NOT_SENT` (`AUTH_CANCELLED`, `AUTH_FAILED`, `AUTH_UNAVAILABLE`, `ONLINE_REQUIRED`, `AMOUNT_EXCEEDS_CARD_LIMIT`, `TOKEN_NOT_ACTIVE`, `DEVICE_NOT_BOUND`, `NO_ACTIVE_CARD`, `CARD_CANNOT_SHOW_QR`, `INVALID_REQUEST`), `message`, `payload` (**render as the QR**; `nil` unless `APPROVED`), `tokenUniqueReference`, `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. The payment's own outcome arrives later, on the history row. To show "paid ✓" on the customer's screen, check **this QR's own payment** while the QR is up: call [`refreshTransactionStatus`](#refreshtransactionstatus) with its `transactionHash` — one request per check — and stop on a final status:
-
-```swift
-guard let hash = qr.transactionHash else { return }
-while !Task.isCancelled {
-    try? await Task.sleep(nanoseconds: 3_000_000_000)
-    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
-    let row = try? await VeyraWallet.shared.tokenisation
-        .refreshTransactionStatus(transactionHash: hash).value
-    switch row?.authorizationStatus {
-    case "APPROVED": onSettled(approved: true); return
-    case "DECLINED", "FAILED": onSettled(approved: false); return
-    default: continue   // PENDING (the QR's own row exists from the moment it is shown), RETRY, or not found yet: keep the QR up
-    }
-}
-```
-
-The QR's history row is created `PENDING` as soon as the QR is shown, so finding the row is not
-the answer — only a final status is. **Don't loop `reconcilePendingTransactions` here:** it asks
-about every open payment on the device back-to-back, so on a short loop it gets the wallet
-throttled (`429`) by the gateway.
+`cancelPayment(merchantOrderID:)` with the verified payment's `merchantOrderID` cancels a scan-to-pay while it is still on the phone, and answers at once with a `CancelResult`. A QR that carries no order ID cannot be cancelled. A shown QR has nothing to cancel on the wallet side — the merchant's charge is the payment. See [Cancelling a call](#cancelling-a-call).
 
 ---
 
-### History, receipts & maintenance
+### History, receipts and reconciliation
 
-#### `getTransactions`
+| Call | What it does | Returns |
+|---|---|---|
+| `transactions(tokenUniqueReference:limit:)` | A token's payments, most recent first — local read | `[TransactionSummary]` |
+| `reconcilePendingTransactions()` | Asks the backend about every open payment now | `ReconcileResult` |
+| `refreshTransactionStatus(transactionHash:)` | Asks the backend about one payment now | `VeyraLookup<TransactionSummary>` |
+| `refreshCreditConfirmation(transactionHash:)` | Asks now whether the merchant's bank was credited | `VeyraLookup<TransactionSummary>` |
+| `processReceipt(_:expectedTransactionHash:)` | Verifies and stores a scanned merchant receipt | `ReceiptScan` |
+| `receipts(limit:)` | Stored receipts, most recent first | `[TransactionReceipt]` |
+| `receiptForTransaction(_:)` | The receipt linked to a payment, or `nil` | `TransactionReceipt?` |
 
-The card's full local history across every rail iOS has (scanned QR, shown QR), most recent first. No network call. Empty when no card on this device has that reference, or the card has no payments yet. Called on `VeyraWallet.shared` — the same name and default (`limit: 50`) as on Android and React Native.
+#### `transactions`
+
+The card's full local history across every rail iOS has (scanned QR, shown QR), most recent first. No network call. Empty when no card on this device has that reference, or the card has no payments yet. Android's and React Native's `getTransactions`, with the same default (`limit: 50`).
 
 ```swift
-let history = try await VeyraWallet.shared.getTransactions(tokenUniqueReference: ref)          // last 50
-let lastFive = try await VeyraWallet.shared.getTransactions(tokenUniqueReference: ref, limit: 5)
+let history = try await wallet.transactions(tokenUniqueReference: ref)          // last 50
+let lastFive = try await wallet.transactions(tokenUniqueReference: ref, limit: 5)
 ```
-
-`tokenisation.transactionHistory(tokenUniqueReference:limit:)` is **deprecated**: the same read, still working, with its old default of 100. Move to `VeyraWallet.shared.getTransactions(tokenUniqueReference:limit:)`.
 
 `TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED` / `RETRY`; `nil` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `nil` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `nil` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `nil` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderID` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, generated-QR rows learn it from the status poll, so `nil` on a still-open row means "not learned yet", not "no order id"; for display and reconciliation — receipts and status refreshes key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
-##### `observeTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
+#### `reconcilePendingTransactions`
 
-A wallet payment that gets no immediate answer is stored and polled by the SDK until the backend
-settles it — seconds, or days. Unresolved rows are visible in history, so the customer can be
-looking at the row at the moment it settles. This is how your app hears it without polling:
+Reconcile still-`PENDING` rows against the backend **right now**. The SDK's own app-scoped sweep (above) already resolves them without you, so this is the explicit "check again" rather than the mechanism: call it on an occasion — pull-to-refresh, returning to the foreground, opening history — **never on a loop**. It asks about **every** open row on the device, so a screen waiting for one payment (a [shown QR](#show-qr-to-pay-customer-presented), say) calls [`refreshTransactionStatus`](#refreshtransactionstatus) with that payment's hash instead: one request rather than one per open row. If the gateway throttles (`429`), the pass stops there and the remaining rows wait for the SDK's next sweep.
+
+Unlike the scheduled sweep it ignores both the backoff and the 30-day window — an explicit ask always reaches the backend, and it is the supported way to check a row the sweep has stopped polling. A row whose own check fails is left exactly as it was.
+
+It is a read, so it states no status of its own: it answers a `ReconcileResult` whose `failureReason` is set only when the reconcile itself could not run (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …) — `checked` is `true` when it ran. Read the updated rows from `transactions(tokenUniqueReference:limit:)` either way. Only a [setup error](#setup-errors--thrown) throws.
 
 ```swift
-try VeyraWallet.shared.tokenisation.observeTransactionResolved { resolution in
-    // resolution.transactionHash      — which payment (match your row on this)
-    // resolution.tokenUniqueReference — the card that paid
-    // resolution.status               — APPROVED / DECLINED / FAILED / RETRY (never PENDING)
-    // resolution.responseCode         — the wire literal, for receipts and support
-    // resolution.reason               — e.g. INSUFFICIENT_FUNDS — display, never parse
-    // resolution.amountMinorUnits, resolution.merchantName
+let reconcile = try await wallet.reconcilePendingTransactions()
+if let reason = reconcile.failureReason {         // the reconcile could not run
+    note = reason == "NO_NETWORK_CONNECTION" ? "No internet connection." : "Could not check right now (\(reason))."
+}
+let rows = try await wallet.transactions(tokenUniqueReference: card)   // read the updated rows
+```
+
+#### `refreshTransactionStatus`
+
+```swift
+// A check that could not be made is not thrown: it says why, and the row is unchanged.
+let lookup = try await wallet
+    .refreshTransactionStatus(transactionHash: hash)    // VeyraLookup<TransactionSummary>
+if let reason = lookup.failureReason {
+    note = reason == "NO_NETWORK_CONNECTION"
+        ? "No internet connection — connect and try again."
+        : "Could not check right now (\(reason))."
+} else if let updated = lookup.value {                  // nil if no row carries that hash
+    live = updated
 }
 ```
 
-**This is not the same channel as `softpos.observeTransactionResolved`**, and
-the two are not interchangeable: that one is the *merchant's* side of a payment and identifies a
-sale by the reference the merchant's own app supplied — a value a wallet never sees. The wallet
-keys on `transactionHash`.
+The **per-transaction** counterpart to `reconcilePendingTransactions`, which asks about every open
+row and answers only whether it ran (`ReconcileResult`) — this one answers about the row the customer is actually looking at, keyed
+by its `transactionHash`.
 
-Fires only on a genuine `PENDING` → final transition: a poll that leaves the row pending, and a
-later write that backfills merchant details onto an already-final row, both wake nothing. Register
-once at start-up, no replay (read the history when a screen appears), last registration wins,
-delivered on the main thread. `stopObservingTransactionResolved()` clears it.
+The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30
+days**. Polling never invents an outcome — a row that ages out simply stops being asked about and
+stays `PENDING`. Expose this in your UI so the customer can ask on demand, which is the only route
+to an answer once the window has closed.
 
-##### Merchant credit confirmation (wallet side)
+Show it **only while the row is `PENDING`**: a settled row has nothing to ask about. An offline
+phone reports `failureReason` `NO_NETWORK_CONNECTION` rather than a `nil` value — a `nil` `value`
+with no `failureReason` means "no row on this device carries that hash", which is a different answer
+and must not be shown as a network problem.
+
+#### Merchant credit confirmation (wallet side)
 
 Did the money actually reach the merchant's bank? The wallet asks the same question the merchant's own SDK asks about that sale, from the payer's side — **settlement confirmation only**, it never changes or restates the payment outcome.
 
-**The SDK does the polling; your view renders the stored row.** Once a payment is approved, a sweep started at `configure(_:customerID:)` for the signed-in customer asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`getTransactions(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
+**The SDK does the polling; your view renders the stored row.** Once a payment is approved, a sweep started at `configure(customerID:config:provider:)` for the signed-in customer asks the gateway on an exponential backoff for up to **30 days**, across every screen — no view starts or stops it. There is deliberately **no wallet callback** for this: the stored row is the whole surface. Read it when a transaction detail view appears, and re-read (`transactions(...)`) every few seconds while it is up if you want the line to flip live, as the sample's `TransactionDetailView` does.
 
 These three fields are the **eligibility contract**: they are how you decide whether to render a
 credit line at all, and whether you may call `refreshCreditConfirmation` (below). They are not merely
@@ -1754,7 +1848,7 @@ tx.authorizationStatus == "APPROVED"
 ```
 
 ```swift
-let lookup = try await VeyraWallet.shared.tokenisation
+let lookup = try await wallet
     .refreshCreditConfirmation(transactionHash: hash)   // VeyraLookup<TransactionSummary>
 if let reason = lookup.failureReason { showNote(reason) } // the row is unchanged
 else if let updated = lookup.value { live = updated }     // nil if unknown here
@@ -1773,52 +1867,7 @@ else if let updated = lookup.value { live = updated }     // nil if unknown here
   offline phone reports `NO_NETWORK_CONNECTION`). Show it and leave the credit line reading "not
   confirmed yet".
 
-#### `reconcilePendingTransactions`
-
-Reconcile still-`PENDING` rows against the backend **right now**. The SDK's own app-scoped sweep (above) already resolves them without you, so this is the explicit "check again" rather than the mechanism: call it on an occasion — pull-to-refresh, returning to the foreground, opening history — **never on a loop**. It asks about **every** open row on the device, so a screen waiting for one payment (a [shown QR](#show-qr-to-pay-customer-presented), say) calls [`refreshTransactionStatus`](#refreshtransactionstatus) with that payment's hash instead: one request rather than one per open row. If the gateway throttles (`429`), the pass stops there and the remaining rows wait for the SDK's next sweep.
-
-Unlike the scheduled sweep it ignores both the backoff and the 30-day window — an explicit ask always reaches the backend, and it is the supported way to check a row the sweep has stopped polling. A row whose own check fails is left exactly as it was.
-
-It is a read, so it states no status of its own: it answers a `ReconcileResult` whose `failureReason` is set only when the reconcile itself could not run (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`, …) — `checked` is `true` when it ran. Read the updated rows from `getTransactions` either way. Only a [setup error](#setup-errors--thrown) throws.
-
-```swift
-let reconcile = try await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
-if let reason = reconcile.failureReason {         // the reconcile could not run
-    note = reason == "NO_NETWORK_CONNECTION" ? "No internet connection." : "Could not check right now (\(reason))."
-}
-let rows = try await VeyraWallet.shared.getTransactions(tokenUniqueReference: card)   // read the updated rows
-```
-
-#### `refreshTransactionStatus`
-
-```swift
-// A check that could not be made is not thrown: it says why, and the row is unchanged.
-let lookup = try await VeyraWallet.shared.tokenisation
-    .refreshTransactionStatus(transactionHash: hash)    // VeyraLookup<TransactionSummary>
-if let reason = lookup.failureReason {
-    note = reason == "NO_NETWORK_CONNECTION"
-        ? "No internet connection — connect and try again."
-        : "Could not check right now (\(reason))."
-} else if let updated = lookup.value {                  // nil if no row carries that hash
-    live = updated
-}
-```
-
-The **per-transaction** counterpart to `reconcilePendingTransactions`, which asks about every open
-row and answers only whether it ran (`ReconcileResult`) — this one answers about the row the customer is actually looking at, keyed
-by its `transactionHash`.
-
-The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30
-days**. Polling never invents an outcome — a row that ages out simply stops being asked about and
-stays `PENDING`. Expose this in your UI so the customer can ask on demand, which is the only route
-to an answer once the window has closed.
-
-Show it **only while the row is `PENDING`**: a settled row has nothing to ask about. An offline
-phone reports `failureReason` `NO_NETWORK_CONNECTION` rather than a `nil` value — a `nil` `value`
-with no `failureReason` means "no row on this device carries that hash", which is a different answer
-and must not be shown as a network problem.
-
-#### `tokenisation.processReceipt` / `receipts` / `receipt(forTransactionHash:)`
+#### `processReceipt` / `receipts` / `receiptForTransaction`
 
 Scan a merchant's **receipt QR** to store the customer's copy. The SDK decodes, validates that the receipt matches a payment this wallet actually made, de-duplicates and stores it.
 
@@ -1843,7 +1892,7 @@ The receipt is checked and stored **on the phone** — nothing is sent. `process
 
 ```swift
 let base64 = Data(payload.utf8).base64EncodedString()
-let scan = try await VeyraWallet.shared.tokenisation.processReceipt(
+let scan = try await wallet.processReceipt(
     base64, expectedTransactionHash: tx.transactionHash)
 if let receipt = scan.receipt {
     show(receipt)
@@ -1851,28 +1900,153 @@ if let receipt = scan.receipt {
     scanError = scan.message ?? scan.responseStatusReason   // FAILED / RECEIPT_MISMATCH, …
 }
 
-let receipts = try await VeyraWallet.shared.tokenisation.receipts(limit: 100)
-let linked   = try await VeyraWallet.shared.tokenisation.receipt(forTransactionHash: hash)
+let receipts = try await wallet.receipts(limit: 100)
+let linked   = try await wallet.receiptForTransaction(hash)
 ```
 
-#### Wallet maintenance — automatic; `topUpKeysIfNeeded` / `lukState`
+#### Wallet maintenance — automatic
 
 The SDK maintains its own cards — no app wiring required. At `configure`, whenever the app becomes active, and every 15 minutes while the app runs, it syncs each stored card's server status (a suspended card becomes non-payable until polled active again; a deactivated one is removed), self-heals cards the server marks as needing refresh, and tops up the active card's payment keys if they are running low (the key check also runs automatically before every payment). iOS suspends timers while the app is suspended, so nothing runs in the background — the next foreground or launch catches everything up.
 
-`topUpKeysIfNeeded()` remains available as an **optional** immediate nudge — for example behind your own refresh gesture. A call landing while an automatic run is in flight is a no-op:
+There is nothing to call for any of it. What your app may still do on foreground is settle open payments — that is a history call, not maintenance:
 
 ```swift
-Task {
-    try? await VeyraWallet.shared.tokenisation.topUpKeysIfNeeded()
-    _ = try? await VeyraWallet.shared.tokenisation.reconcilePendingTransactions()
+Task { _ = try? await wallet.reconcilePendingTransactions() }
+```
+
+There is deliberately no manual refresh call and no key count to read — the SDK owns the payment keys. What your app shows is whether a card can pay: `StoredCard.requiresOnline` and `deviceNotBound` from `tokens()`, kept current by [`observeCardKeyStateChanged`](#observecardkeystatechanged--a-token-ran-out-of-payment-keys-or-got-them-back).
+
+---
+
+### Observers
+
+| Call | What it does | Returns |
+|---|---|---|
+| `observeTokenStatusChanged(onTokenStatusChanged:)` / `stopObservingTokenStatusChanged()` | The issuer changed a token's status | `TokenStatusChange` to the callback |
+| `observeTransactionResolved(onTransactionResolved:)` / `stopObservingTransactionResolved()` | A `PENDING` payment reached its outcome | `WalletTransactionResolution` to the callback |
+| `observeCardKeyStateChanged(_:)` / `stopObservingCardKeyStateChanged()` | A token ran out of payment keys, got them back, or can never be re-keyed on this phone | `CardKeyStateEvent` (`tokenUniqueReference`, `requiresOnline`, `deviceNotBound`) to the listener |
+| `observePaymentRefusals(forTokenUniqueReference:onRequireOnline:onAmountExceedCardLimit:onDeviceNotBound:)` / `stopObservingPaymentRefusals(forTokenUniqueReference:)` | A payment with this token was refused before anything was sent | the refusal to the matching callback |
+
+Callbacks arrive on the main thread. Each registration is dropped on sign-out and on a customer switch — register again after every `configure` (see [Customers](#customers-signing-in-signing-out-switching)).
+
+#### `observeTokenStatusChanged` — the SDK tells you when a token's status changes
+
+The sweep can apply `SUSPENDED` while the customer is *looking at* a card screen. Subscribe and you
+are told the moment it is applied:
+
+```swift
+try wallet.observeTokenStatusChanged { change in
+    // change.tokenUniqueReference — which card (it fires for any stored card)
+    // change.status               — ACTIVE / SUSPENDED / EXPIRED / DEACTIVATED /
+    //                               PENDING_ACTIVATION / UNKNOWN
+    // change.rawStatus            — the literal as stored; log this one
+    // change.canPay               — whether the card can pay right now
+    // change.previousStatus       — what it held before, or nil if this is its first status
 }
 ```
 
-`lukState(tokenUniqueReference:)` returns `LukState(usableKeyCount, refreshDue)` for an optional "keys remaining" indicator. There is deliberately no manual refresh call — the SDK owns when keys refresh; your app only observes (`lukState`, `requiresOnline`, `deviceNotBound`).
+- **Branch on `canPay`, not on `status`.** It is the same predicate the SDK's own payment gates use,
+  so a status added after your build shipped is correctly reported as *not* payable.
+- **Register once, at start-up** — not per card screen.
+- **It does not replay.** Read `tokens()` when a screen appears; keep the read path.
+- **Only genuine changes fire.** A sweep re-applying the status a card already had wakes nothing.
+- **Last registration wins**; `stopObservingTokenStatusChanged()` clears it. Delivered on the main thread.
 
-#### `recentActivity`
+#### `observeTransactionResolved` — a `PENDING` payment reached its outcome
 
-`recentActivity(tokenUniqueReference:)` → `[TokenActivity]` — the card's terminal scan-to-pay outcomes (`merchantName`, `amountMinorUnits`, `status` `"APPROVED"`/`"DECLINED"`, `atEpochMillis`), most recent first, local read. Use `getTransactions` for the full multi-rail list.
+A wallet payment that gets no immediate answer is stored and polled by the SDK until the backend
+settles it — seconds, or days. Unresolved rows are visible in history, so the customer can be
+looking at the row at the moment it settles. This is how your app hears it without polling:
+
+```swift
+try wallet.observeTransactionResolved { resolution in
+    // resolution.transactionHash      — which payment (match your row on this)
+    // resolution.tokenUniqueReference — the card that paid
+    // resolution.status               — APPROVED / DECLINED / FAILED / RETRY (never PENDING)
+    // resolution.responseCode         — the wire literal, for receipts and support
+    // resolution.reason               — e.g. INSUFFICIENT_FUNDS — display, never parse
+    // resolution.amountMinorUnits, resolution.merchantName
+}
+```
+
+**This is not the same channel as `softpos.observeTransactionResolved`**, and
+the two are not interchangeable: that one is the *merchant's* side of a payment and identifies a
+sale by the reference the merchant's own app supplied — a value a wallet never sees. The wallet
+keys on `transactionHash`.
+
+Fires only on a genuine `PENDING` → final transition: a poll that leaves the row pending, and a
+later write that backfills merchant details onto an already-final row, both wake nothing. Register
+once at start-up, no replay (read the history when a screen appears), last registration wins,
+delivered on the main thread. `stopObservingTransactionResolved()` clears it.
+
+#### `observeCardKeyStateChanged` — a token ran out of payment keys, or got them back
+
+`StoredCard.requiresOnline` tells you a card cannot pay until the SDK refreshes its keys. This is the
+push version of that same value, read from the same function, so a callback can never contradict the
+list you are about to draw.
+
+```swift
+try wallet.observeCardKeyStateChanged { event in
+    if event.deviceNotBound {
+        // "add this card again on this phone" — going online will not help
+    } else {
+        // grey the card while event.requiresOnline, un-grey it when it clears
+    }
+}
+```
+
+One listener receives every change as a `CardKeyStateEvent` — `tokenUniqueReference`,
+`requiresOnline` and `deviceNotBound` — the same event Android and React Native deliver. When a card
+can never be re-keyed on this phone, `deviceNotBound` is `true` and `requiresOnline` is `false`
+(going online cannot help), so check `deviceNotBound` before un-greying a card.
+
+**Read this limit before you word your UI.** It fires from the two moments the SDK is actually
+running: a payment using a key, and a refresh delivering new ones. Payment keys *also* expire by
+clock, with no SDK code running — **nothing fires for that**, and such a card simply reads as
+`requiresOnline` on your next `tokens()`. The first evaluation of a card after launch is a silent
+baseline for the same reason. Keep reading the card list when a screen appears.
+
+There is deliberately no API to trigger a key refresh — the SDK owns when keys are replenished.
+`stopObservingCardKeyStateChanged()` clears the observer.
+
+#### `observePaymentRefusals` — card refusals, per card
+
+The wallet's card refusals (`ONLINE_REQUIRED`, `AMOUNT_EXCEEDS_CARD_LIMIT`, `DEVICE_NOT_BOUND`) are
+also available as an observer, registered **per card**:
+
+```swift
+try wallet.observePaymentRefusals(
+    forTokenUniqueReference: card.tokenUniqueReference,
+    onRequireOnline: { _, amountMinorUnits, rail in
+        promptToConnect(amountMinorUnits)
+    },
+    onAmountExceedCardLimit: { _, amountMinorUnits, cardLimitMinorUnits, rail in
+        offerSmallerAmount(cardLimitMinorUnits)   // never "go online" — the cap does not move
+    },
+    onDeviceNotBound: { _, amountMinorUnits, rail in   // optional — defaults to nil
+        promptToReAddCard()                       // "add this card again on this phone"
+    }
+)
+
+// when the view goes:
+try wallet.stopObservingPaymentRefusals(
+    forTokenUniqueReference: card.tokenUniqueReference
+)
+```
+
+A handler registered for one card **never hears about another's**. Registering the same card again
+replaces its handlers; other cards are unaffected. The pay call still returns its `NOT_SENT`
+outcome, so this observer is additional — for apps that would rather handle refusals in one place
+than at every call site.
+
+`onDeviceNotBound` is an optional trailing parameter
+(`((_ tokenUniqueReference: String?, _ amountMinorUnits: Int64, _ rail: String) -> Void)? = nil`).
+Unlike the other two, it is also a **card state**: the same card reads `deviceNotBound == true` in
+`tokens()` from then on, until it is removed.
+
+**A refusal the SDK could not attribute to a card** — the callback's `tokenUniqueReference` is
+`nil` — reaches **every** registered handler rather than none. iOS fires these from the QR rails
+only (`rail` is `"CPM_QR"` or `"MPM_QR"`), having no tap-to-pay.
 
 ---
 
@@ -1888,8 +2062,8 @@ Every cancel names the call by a **reference you already hold**:
 | Call | Cancel with | Reference |
 |---|---|---|
 | Card tap (`tap.start`), customer-QR charge (`chargeCustomerQr`), get-paid QR create (`createPaymentContext`) | `softpos.cancelPayment(merchantOrderID:)` | The `merchantOrderID` the payment was started with. You don't say which rail: the order ID identifies the payment |
-| Scan to pay (`tokenisation.payScannedContext`) | `VeyraWallet.shared.tokenisation.cancelPayment(merchantOrderID:)` | `VerifiedPayment.merchantOrderID` — the order ID signed into the scanned QR. `nil` on a QR that carries none: that payment cannot be cancelled (disable your Cancel button while it is paying) |
-| Add a card (`tokenisation.digitise`) | `VeyraWallet.shared.tokenisation.cancelDigitise(clientRequestID:)` | The `clientRequestID` you passed to `digitise`. Pass none and the SDK generates one, and that add-card cannot be cancelled by reference |
+| Scan to pay (`wallet.payScannedContext`) | `wallet.cancelPayment(merchantOrderID:)` | `VerifiedPayment.merchantOrderID` — the order ID signed into the scanned QR. `nil` on a QR that carries none: that payment cannot be cancelled (disable your Cancel button while it is paying) |
+| Add a card (`wallet.digitise`) | `wallet.cancelDigitise(clientRequestID:)` | The `clientRequestID` you passed to `digitise`. Pass none and the SDK generates one, and that add-card cannot be cancelled by reference |
 
 The merchant's and the wallet's payments are kept apart: in a combined app the wallet's
 `cancelPayment(merchantOrderID: "ORDER-1")` can never cancel the merchant's own payment with the same
@@ -1900,9 +2074,9 @@ order ID.
 | Member | Returns | Description |
 |---|---|---|
 | `softpos.cancelPayment(merchantOrderID:)` | `CancelResult` | Cancel the merchant payment started with this order ID — tap, customer-QR charge or get-paid QR create — while it is still on the phone. Synchronous; answers at once |
-| `VeyraWallet.shared.tokenisation.cancelPayment(merchantOrderID:)` | `CancelResult` | Cancel the scan-to-pay of the QR carrying this order ID while it is still on the phone. Synchronous; answers at once |
-| `VeyraWallet.shared.tokenisation.cancelDigitise(clientRequestID:)` | `CancelResult` | Cancel the add-card started with this `clientRequestID` while it is still on the phone. Synchronous; answers at once |
-| `tokenisation.digitise(..., clientRequestID:)` | `DigitiseResult` | Optional, default `nil`: your reference for this add-card attempt, the one `cancelDigitise` names |
+| `wallet.cancelPayment(merchantOrderID:)` | `CancelResult` | Cancel the scan-to-pay of the QR carrying this order ID while it is still on the phone. Synchronous; answers at once |
+| `wallet.cancelDigitise(clientRequestID:)` | `CancelResult` | Cancel the add-card started with this `clientRequestID` while it is still on the phone. Synchronous; answers at once |
+| `wallet.digitise(DigitiseParams(..., clientRequestID:))` | `DigitiseResult` | Optional, default `nil`: your reference for this add-card attempt, the one `cancelDigitise` names |
 | `CancelResult` | — | The answer to a cancel (`VeyraCommon`, re-exported by both products): `.cancelled`, `.tooLateToCancelRequestAlreadySent`, `.tooLateToCancelTaskAlreadyProcessed`, `.noPaymentInProgressForOrderID`, `.noDigitisationInProgressForClientRequestID`. `rawValue` is the wire string (`"CANCELLED"`, …) for logs |
 
 ### What the cancel answers, and what to show
@@ -1939,14 +2113,13 @@ if result.responseStatus == VeyraResponseStatus.notSent && result.responseStatus
 
 // Wallet add-card: pass your own clientRequestID so the attempt can be cancelled.
 let requestID = UUID().uuidString
-let r = try await VeyraWallet.shared.tokenisation.digitise(/* … */, bankName: bankName,
-                                                           clientRequestID: requestID)
+let r = try await wallet.digitise(DigitiseParams(/* … */, clientRequestID: requestID))
 // Cancel button, while that await is running:
-let answer = VeyraWallet.shared.tokenisation.cancelDigitise(clientRequestID: requestID)
+let answer = wallet.cancelDigitise(clientRequestID: requestID)
 
 // Wallet scan-to-pay: cancel by the order ID in the QR (hide Cancel when it is nil).
 if let orderID = payment.merchantOrderID {
-    let answer = VeyraWallet.shared.tokenisation.cancelPayment(merchantOrderID: orderID)
+    let answer = wallet.cancelPayment(merchantOrderID: orderID)
 }
 ```
 
@@ -1986,7 +2159,7 @@ order ID (or `clientRequestID`) is still unused and may be used again. See
 | 2.x | 3.0.0 |
 |---|---|
 | `TapPaymentSession.cancel()` | **Removed.** It stopped the tap at any point — even after the payment had been sent to the bank, dropping an answer that was still coming. Call `softpos.cancelPayment(merchantOrderID:)` with the session's order ID, on Cancel and when the screen leaves. Before sending it stops the reader and the tap's `.result` carries `NOT_SENT` / `CANCELLED`; after sending the payment runs to its normal result |
-| No way to cancel a customer-QR charge, a get-paid QR create, a scan to pay or an add-card | `cancelPayment(merchantOrderID:)` (merchant), `tokenisation.cancelPayment(merchantOrderID:)` and `tokenisation.cancelDigitise(clientRequestID:)` (wallet), or cancel the awaiting `Task` |
+| No way to cancel a customer-QR charge, a get-paid QR create, a scan to pay or an add-card | `softpos.cancelPayment(merchantOrderID:)` (merchant), `wallet.cancelPayment(merchantOrderID:)` and `wallet.cancelDigitise(clientRequestID:)` (wallet), or cancel the awaiting `Task` |
 | `digitise(...)` had no reference you could pass | `digitise(..., clientRequestID:)` — optional; pass one to make the add-card cancellable |
 
 ## Errors and outcomes
@@ -2019,7 +2192,7 @@ facade's `VeyraSDKError` has one case, `.notConfigured`.
 
 | Error | When it happens | Fix |
 |---|---|---|
-| `.notConfigured` | Any call before `VeyraWallet.configure(_:customerID:provider:)` / `VeyraSoftPOS.configure(_:customerID:provider:)`. In a combined app, `VeyraSDKError.notConfigured` is thrown by `VeyraSDK.shared.currentMode` (a `get throws` property) when it is read before `VeyraSDK.configure(customerID:provider:softpos:wallet:)` | Configure the SDK first, at app start. |
+| `.notConfigured` | Any call before `VeyraWallet.configure(customerID:config:provider:)` / `VeyraSoftPOS.configure(customerID:config:provider:)`. In a combined app, `VeyraSDKError.notConfigured` is thrown by `VeyraSDK.shared.currentMode()`, `.wallet` and `.softpos` before `VeyraSDK.configure(customerID:config:provider:)` | Configure the SDK first, at app start. |
 | `.notSignedIn` | Any call with no customer — after `signOut()`, before the next `configure` | Call `configure` with the customer before using the SDK. Don't call wallet or merchant APIs from screens reachable while signed out. |
 | `.invalidConfiguration(message:)` | Thrown by `configure`: a provider it can't use (both kinds at once, a `providerType` that contradicts its protocol, a blank `clientId`); a provider of a different kind from an earlier `configure` in this process; a blank `customerID`. `VeyraSDK.configure` throws the member SDK's case. Thrown by the call that needs it: a missing required wallet setting (payment app provider ID, token requestor ID, Apple Team ID) on `verifyAccount` / `digitise`; and `tap.start(_:onEvent:)` when both SDKs are in one app without `VeyraSDK` | Fix the configuration. `message` names the exact problem. |
 | `.sessionRequired` | A payment call made without its screen session | Declared for parity with React Native, which raises it. On iOS the SDK follows the screen lifecycle itself, so you should never see it. |
@@ -2111,7 +2284,7 @@ Four rules follow from it:
 A wallet payment, handled the recommended way — `responseStatus` first, then `responseStatusReason`:
 
 ```swift
-let outcome = try await VeyraWallet.shared.tokenisation.payScannedContext(payment)
+let outcome = try await wallet.payScannedContext(payment)
 // Only a setup error can throw here. Everything below is an outcome.
 
 switch outcome.responseStatus {
@@ -2243,8 +2416,8 @@ A check that could not be made never changes the stored row, and a read changes 
 retrying it as is is always safe. Returned by `transactionStatus(...)`,
 `refreshTransactionStatus(merchantTransactionReference:)`, `paymentStatus(merchantOrderID:)`, `creditConfirmation(...)`,
 `refreshCreditConfirmation(merchantTransactionReference:)`, `contextStatus(txRef:)`,
-`tokenisation.refreshTransactionStatus(transactionHash:)` and
-`tokenisation.refreshCreditConfirmation(transactionHash:)`.
+`wallet.refreshTransactionStatus(transactionHash:)` and
+`wallet.refreshCreditConfirmation(transactionHash:)`.
 
 The other reads — the bank lists, `refreshStatus()`, `tokenStatus`, `verifyAccount` — return the
 triple like any call, but are **never `PENDING`**: a read that got no usable answer is `FAILED`
@@ -2265,21 +2438,22 @@ with the reason, and is always safe to retry as is.
 | `transactionStatus(...)` / `creditConfirmation(...)` | `VeyraLookup<[TransactionStatus]>` / `VeyraLookup<CreditConfirmation>` | the gateway's answer, or `failureReason` |
 | `observeTransactionResolved { }` | `TransactionResolution` | `status`, `responseCode`, `reason` |
 | `register(_:)` | `MerchantRegistrationResult` | `responseStatus`, `responseStatusReason`, `message`; no `responseCode` |
-| `refreshStatus()` / `activate` / `deactivate` / `update` | `MerchantStatus` | `responseStatus`, `responseStatusReason`, `message`; no `responseCode` |
+| `refreshStatus()` / `activate` / `deactivate` / `updateMerchant(_:)` | `MerchantStatus` | `responseStatus`, `responseStatusReason`, `message`; no `responseCode` |
 | `banks()` | `SettlementBankList` | `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
-| `tokenisation.payScannedContext(_:)` | `PaymentOutcome` | `responseStatus`, `responseStatusReason`, `responseCode`, `message`; `approved` is `responseStatus == "APPROVED"` |
-| `tokenisation.showQrToPay(amountMinorUnits:onExpired:)` | `PaymentQr` | `responseStatus` (`APPROVED` or `NOT_SENT` only — nothing is sent), `responseStatusReason`, `message`. The merchant submits the payment; its outcome lands on the history row |
-| `getTransactions(...)` | `[TransactionSummary]` | `authorizationStatus`, `responseCode`, `responseStatusReason` |
-| `tokenisation.refreshTransactionStatus(transactionHash:)` / `refreshCreditConfirmation(transactionHash:)` | `VeyraLookup<TransactionSummary>` | the row, or `failureReason` |
-| `tokenisation.observeTransactionResolved { }` | `WalletTransactionResolution` | `status`, `responseCode`, `reason` |
-| `tokenisation.digitise(...)` / `verifyAccount(...)` | `DigitiseResult` / `VerifyAccountResponse` | `responseCode` (the issuer's decision — see [Table C](#table-c--veyra-token-service-wallet)), `responseStatus`, `responseStatusReason`, `message`. Never `PENDING` |
-| `tokenisation.requestActivationCode(...)` / `activate(...)` | `ActivationCodeResponse` / `ActivateResponse` | `responseStatus`, `responseStatusReason` (on `FAILED`, the failure code), plus `status` (`"SUCCESS"` / `"FAILURE"`) and the typed `failureCode` — see [Activation](#activation--failurecode) |
-| `tokenisation.deactivateToken(_:)` | `TokenStatusUpdateResponse` | `responseStatus`, `responseStatusReason`, `message`, `status`; only `APPROVED` removes the card |
-| `tokenisation.tokenStatus(tokenUniqueReference:)` | `TokenStatusResult` | `tokenStatus`, `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
-| `tokenisation.banks(accountNumber:)` | `BankList` | `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
-| `tokenisation.setActiveToken(_:)` | `CardSelection` | `responseStatus` (`APPROVED`, or `FAILED` / `CARD_NOT_FOUND`), `responseStatusReason`, `message`, `selected` |
-| `tokenisation.processReceipt(_:expectedTransactionHash:)` | `ReceiptScan` | `responseStatus` (`APPROVED` or `FAILED` — nothing is sent), `responseStatusReason`, `message`, `receipt` on `APPROVED` |
-| `tokenisation.reconcilePendingTransactions()` | `ReconcileResult` | `failureReason` (only when the reconcile could not run), `message`, `checked`; no status — read the rows from history |
+| `wallet.payScannedContext(_:)` | `PaymentOutcome` | `responseStatus`, `responseStatusReason`, `responseCode`, `message`; `approved` is `responseStatus == "APPROVED"` |
+| `wallet.showQrToPay(amountMinorUnits:onExpired:)` | `PaymentQr` | `responseStatus` (`APPROVED` or `NOT_SENT` only — nothing is sent), `responseStatusReason`, `message`. The merchant submits the payment; its outcome lands on the history row |
+| `transactions(...)` | `[TransactionSummary]` | `authorizationStatus`, `responseCode`, `responseStatusReason` |
+| `wallet.refreshTransactionStatus(transactionHash:)` / `refreshCreditConfirmation(transactionHash:)` | `VeyraLookup<TransactionSummary>` | the row, or `failureReason` |
+| `wallet.observeTransactionResolved { }` | `WalletTransactionResolution` | `status`, `responseCode`, `reason` |
+| `wallet.observeCardKeyStateChanged { }` | `CardKeyStateEvent` | `tokenUniqueReference`, `requiresOnline`, `deviceNotBound` |
+| `wallet.digitise(...)` / `verifyAccount(...)` | `DigitiseResult` / `VerifyAccountResponse` | `responseCode` (the issuer's decision — see [Table C](#table-c--veyra-token-service-wallet)), `responseStatus`, `responseStatusReason`, `message`. Never `PENDING` |
+| `wallet.requestActivationCode(...)` / `activate(...)` | `ActivationCodeResponse` / `ActivateResponse` | `responseStatus`, `responseStatusReason` (on `FAILED`, the failure code), plus `status` (`"SUCCESS"` / `"FAILURE"`) and the typed `failureCode` — see [Activation](#activation--failurecode) |
+| `wallet.deactivateToken(_:)` | `TokenStatusUpdateResponse` | `responseStatus`, `responseStatusReason`, `message`, `status`; only `APPROVED` removes the card |
+| `wallet.tokenStatus(tokenUniqueReference:)` | `TokenStatusResult` | `tokenStatus`, `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
+| `wallet.banks(accountNumber:)` | `BankList` | `responseStatus`, `responseStatusReason`, `message`; never `PENDING` |
+| `wallet.setActiveToken(_:)` | `CardSelection` | `responseStatus` (`APPROVED`, or `FAILED` / `CARD_NOT_FOUND`), `responseStatusReason`, `message`, `selected` |
+| `wallet.processReceipt(_:expectedTransactionHash:)` | `ReceiptScan` | `responseStatus` (`APPROVED` or `FAILED` — nothing is sent), `responseStatusReason`, `message`, `receipt` on `APPROVED` |
+| `wallet.reconcilePendingTransactions()` | `ReconcileResult` | `failureReason` (only when the reconcile could not run), `message`, `checked`; no status — read the rows from history |
 
 #### Table A — outcomes the SDK itself produces
 
@@ -2311,7 +2485,7 @@ produce on iOS. **`NOT_SENT` rows apply to payments and add-card only** (see
 | `NOT_SENT` | — | `SDK_INTERNAL_ERROR` | The SDK failed before sending | Report to support; retry with the same order ID |
 | `FAILED` | — | `CARD_NOT_FOUND` | Wallet: `setActiveToken` was given a reference that is not in this wallet | Refresh the card list |
 | `FAILED` | — | `NFC_UNAVAILABLE` | Wallet: `openPaySession()` — iPhone cannot pay by tap; always the answer on iOS | Offer the QR rails |
-| `FAILED` | — | `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` | Wallet: `processReceipt` refused the scanned receipt (see [`processReceipt`](#tokenisationprocessreceipt--receipts--receiptfortransactionhash)) | Show the reason; for `PAYMENT_NOT_CONFIRMED`, scan again shortly |
+| `FAILED` | — | `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` | Wallet: `processReceipt` refused the scanned receipt (see [`processReceipt`](#processreceipt--receipts--receiptfortransaction)) | Show the reason; for `PAYMENT_NOT_CONFIRMED`, scan again shortly |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | Payments: the request was sent but no answer came back (timeout, connection lost) | Wait; the SDK stores the payment and resolves it |
 | `PENDING` | `06` | `UPSTREAM_ERROR` | Payments: Veyra answered with an error or something unreadable | Wait; the SDK stores the payment and resolves it |
 | `PENDING` | — | `SDK_INTERNAL_ERROR` | Payments: the SDK failed after sending | Wait; the SDK still resolves the payment |
@@ -2351,44 +2525,7 @@ offline; this product authorises online only).
 
 `AMOUNT_EXCEEDS_CARD_LIMIT` and `DEVICE_NOT_BOUND` do not resolve by connecting at all.
 
-##### Card refusals, per card — `observePaymentRefusals`
-
-The wallet's card refusals (`ONLINE_REQUIRED`, `AMOUNT_EXCEEDS_CARD_LIMIT`, `DEVICE_NOT_BOUND`) are
-also available as an observer, registered **per card**:
-
-```swift
-try VeyraWallet.shared.tokenisation.observePaymentRefusals(
-    forTokenUniqueReference: card.tokenUniqueReference,
-    onRequireOnline: { _, amountMinorUnits, rail in
-        promptToConnect(amountMinorUnits)
-    },
-    onAmountExceedsCardLimit: { _, amountMinorUnits, cardLimitMinorUnits, rail in
-        offerSmallerAmount(cardLimitMinorUnits)   // never "go online" — the cap does not move
-    },
-    onDeviceNotBound: { _, amountMinorUnits, rail in   // optional — defaults to nil
-        promptToReAddCard()                       // "add this card again on this phone"
-    }
-)
-
-// when the view goes:
-try VeyraWallet.shared.tokenisation.stopObservingPaymentRefusals(
-    forTokenUniqueReference: card.tokenUniqueReference
-)
-```
-
-A handler registered for one card **never hears about another's**. Registering the same card again
-replaces its handlers; other cards are unaffected. The pay call still returns its `NOT_SENT`
-outcome, so this observer is additional — for apps that would rather handle refusals in one place
-than at every call site.
-
-`onDeviceNotBound` is an optional trailing parameter
-(`((_ tokenUniqueReference: String?, _ amountMinorUnits: Int64, _ rail: String) -> Void)? = nil`).
-Unlike the other two, it is also a **card state**: the same card reads `deviceNotBound == true` in
-`tokens()` from then on, until it is removed.
-
-**A refusal the SDK could not attribute to a card** — the callback's `tokenUniqueReference` is
-`nil` — reaches **every** registered handler rather than none. iOS fires these from the QR rails
-only (`rail` is `"CPM_QR"` or `"MPM_QR"`), having no tap-to-pay.
+The same refusals are also delivered per token as they happen — see [`observePaymentRefusals`](#observepaymentrefusals--card-refusals-per-card).
 
 #### The triple is the same on every Veyra service
 
@@ -2437,7 +2574,7 @@ to be `FAILED` because the payment stopped before the bank was asked (`07`, `12`
 `91`) is now `RETRY`, with the same code and reason.
 
 **Payment status lookups** (`refreshTransactionStatus(merchantTransactionReference:)`,
-`tokenisation.refreshTransactionStatus(transactionHash:)`, and the rows `reconcilePendingTransactions()` updates) carry
+`wallet.refreshTransactionStatus(transactionHash:)`, and the rows `reconcilePendingTransactions()` updates) carry
 the stored payment's triple from this table, or `25` / `RETRY` / `UNABLE_TO_LOCATE_RECORD` — no such
 payment, so nothing was charged and the order can be paid. If the
 lookup itself fails, the `VeyraLookup` (or `ReconcileResult`) carries a `failureReason` and the payment is left as it was
@@ -2589,7 +2726,7 @@ A `PENDING` payment may well have completed, so the one thing you must not do is
 2. **Let the SDK resolve it.** It stores the transaction and polls with backoff; you do not have to.
 3. **Finish when it settles** — from `observeTransactionResolved` (below), or by reading the row with
    `refreshTransactionStatus(merchantTransactionReference:)` / `transactions(limit:)`. On the wallet,
-   `observeTransactionResolved` and `getTransactions` do the same.
+   `observeTransactionResolved` and `transactions(tokenUniqueReference:)` do the same.
 
 A pending row always converges: it becomes `APPROVED`, `DECLINED` or `FAILED` when the backend settles
 it — or `RETRY` (`25` / `UNABLE_TO_LOCATE_RECORD`) when Veyra has no record of it, so nothing was
@@ -2678,7 +2815,7 @@ Move each `catch` branch to a `responseStatus` / `responseStatusReason` branch:
 | A thrown error from `setActiveToken` (the card is not in this wallet) | `CardSelection` with `FAILED` / `CARD_NOT_FOUND` |
 | None — new in 3.0.0. 2.x had no duplicate-order error: nothing checked a reused order ID (see the next table) | `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` (`94` on a payment) — the order is already paid or being confirmed; take no further payment for it |
 
-Return types changed with it: `banks()` → `SettlementBankList`, `tokenisation.banks(...)` →
+Return types changed with it: `banks()` → `SettlementBankList`, `wallet.banks(...)` →
 `BankList`, `tokenStatus(...)` → `TokenStatusResult`, `inspectCustomerQr(_:)` → `CustomerQrInspection`,
 `processReceipt(...)` → `ReceiptScan` (was `TransactionReceipt`), `reconcilePendingTransactions()` →
 `ReconcileResult` (was `Void`), `setActiveToken(_:)` → `CardSelection` (was `Void`),
@@ -2733,59 +2870,7 @@ What your app observes:
 | `SUSPENDED` / `EXPIRED` / `PENDING_ACTIVATION` | Card refuses to pay (`NOT_SENT` / `TOKEN_NOT_ACTIVE`); `StoredCard.status` shows the status | Render the card as unavailable. **Not sticky** — a later sync unfreezes it automatically. |
 | `DEACTIVATED` | The card and all its material are wiped and it disappears from `tokens()` | Refresh your card list; the user re-adds the card if needed. |
 
-##### `observeTokenLifecycle` — the SDK tells you when a card's status changes
-
-The sweep can apply `SUSPENDED` while the customer is *looking at* a card screen. Subscribe and you
-are told the moment it is applied:
-
-```swift
-try VeyraWallet.shared.tokenisation.observeTokenLifecycle { change in
-    // change.tokenUniqueReference — which card (it fires for any stored card)
-    // change.status               — ACTIVE / SUSPENDED / EXPIRED / DEACTIVATED /
-    //                               PENDING_ACTIVATION / UNKNOWN
-    // change.rawStatus            — the literal as stored; log this one
-    // change.canPay               — whether the card can pay right now
-    // change.previousStatus       — what it held before, or nil if this is its first status
-}
-```
-
-- **Branch on `canPay`, not on `status`.** It is the same predicate the SDK's own payment gates use,
-  so a status added after your build shipped is correctly reported as *not* payable.
-- **Register once, at start-up** — not per card screen.
-- **It does not replay.** Read `tokens()` when a screen appears; keep the read path.
-- **Only genuine changes fire.** A sweep re-applying the status a card already had wakes nothing.
-- **Last registration wins**; `stopObservingTokenLifecycle()` clears it. Delivered on the main thread.
-
-##### `observeCardKeyState` — a card ran out of payment keys, or got them back
-
-`StoredCard.requiresOnline` tells you a card cannot pay until the SDK refreshes its keys. This is the
-push version of that same value, read from the same function, so a callback can never contradict the
-list you are about to draw.
-
-```swift
-try VeyraWallet.shared.tokenisation.observeCardKeyState(
-    onKeyStateChanged: { tokenUniqueReference, requiresOnline in
-        // grey the card, or un-grey it
-    },
-    onDeviceNotBound: { tokenUniqueReference in   // optional — defaults to nil
-        // "add this card again on this phone" — going online will not help
-    }
-)
-```
-
-When a card becomes not-bound to this device and you supply `onDeviceNotBound`, it fires **instead
-of** `onKeyStateChanged` for that change. Without it, `onKeyStateChanged` reports
-`requiresOnline == false` for that card — so read `deviceNotBound` from the card list rather than
-un-greying it.
-
-**Read this limit before you word your UI.** It fires from the two moments the SDK is actually
-running: a payment using a key, and a refresh delivering new ones. Payment keys *also* expire by
-clock, with no SDK code running — **nothing fires for that**, and such a card simply reads as
-`requiresOnline` on your next `tokens()`. The first evaluation of a card after launch is a silent
-baseline for the same reason. Keep reading the card list when a screen appears.
-
-There is deliberately no API to trigger a key refresh — the SDK owns when keys are replenished.
-`stopObservingCardKeyState()` clears the observer.
+To hear about these changes as they happen, see [`observeTokenStatusChanged`](#observetokenstatuschanged--the-sdk-tells-you-when-a-tokens-status-changes) and, for payment keys, [`observeCardKeyStateChanged`](#observecardkeystatechanged--a-token-ran-out-of-payment-keys-or-got-them-back) in [Observers](#observers).
 
 ##### Merchant statuses
 
@@ -2859,12 +2944,12 @@ public struct StoredCard {                  // wallet card display record
     let deviceNotBound: Bool                // added on another device: grey out + "add this card again on this phone"
 }
 
-// tokenisation.observeTokenLifecycle payload — branch on canPay, not on status
+// wallet.observeTokenStatusChanged payload — branch on canPay, not on status
 public struct TokenStatusChange {
     let tokenUniqueReference: String; let status: String; let rawStatus: String
     let canPay: Bool; let previousStatus: String?
 }
-// tokenisation.observeTransactionResolved payload — keyed on transactionHash, NOT on a
+// wallet.observeTransactionResolved payload — keyed on transactionHash, NOT on a
 // merchant reference (that is the merchant SDK's separate channel)
 public struct WalletTransactionResolution {
     let transactionHash: String; let tokenUniqueReference: String?; let status: String
@@ -2880,6 +2965,18 @@ public struct MerchantStatusChange {
 public struct Bank { let slug: String; let name: String; let institutionCode: String }
 public struct BankList { let banks: [Bank]; let responseStatus: String; let responseStatusReason: String?; let message: String? }   // never PENDING
 public struct TokenStatusResult { let tokenStatus: String?; let responseStatus: String; let responseStatusReason: String?; let message: String? }   // never PENDING
+public struct VerifyAccountParams {   // accountHolderName and accountNumberSource optional
+    var accountNumber: String; var institutionCode: String; var walletAccountID: String
+    var accountHolderName: String?; var accountNumberSource: String?
+}
+public struct DigitiseParams {        // the first six required, the rest optional
+    var accountNumber: String; var institutionCode: String; var accountHolderName: String
+    var walletAccountID: String; var emailAddress: String; var recommendation: TokenizationRecommendation
+    var consumerIdentifier: String?; var bvn: String?; var accountHolderAddress: String?; var mobileNumber: String?
+    var clientRequestID: String?; var accountNumberSource: String?
+    var deviceScore: TrustScore?; var accountScore: TrustScore?
+    var recommendationReasons: [TokenizationRecommendationReason]?; var bankName: String?
+}
 public struct VerifyAccountResponse {
     let responseCode: String?; let message: String?
     let responseStatus: String?; let responseStatusReason: String?   // what the call did · why (branch on this)
@@ -2894,7 +2991,7 @@ public struct DigitiseResult {
 }
 public enum TokenizationRecommendation { case approve, decline, requireAdditionalAuthentication }
 public enum TrustScore { case untrusted, lowTrust, moderateTrust, trusted, highlyTrusted }
-public enum ActivationMethod { case maskedEmail, maskedMobilePhone }
+public enum ActivationMedium { case maskedEmail, maskedMobilePhone }
 public enum ActivationReason { case addCard, checkAccountEligibility, other }
 public struct ActivationCodeResponse {
     let responseStatus: String; let responseStatusReason: String?          // on FAILED the reason is the failure code
@@ -2951,8 +3048,6 @@ public struct PaymentQr {
     let expiresAtEpochMillis: Int64
     let transactionHash: String?            // match against history to reconcile exactly this QR
 }
-public struct LukState { let usableKeyCount: Int; let refreshDue: Bool }
-public struct TokenActivity { let merchantName: String; let amountMinorUnits: Int64; let currencyNumeric: String; let status: String; let atEpochMillis: Int64 }
 
 public struct TransactionSummary {          // wallet history row
     let merchantName: String; let amountInMinorUnit: Int64  // Int64 since 1.0.15; was Int
@@ -3057,7 +3152,7 @@ public struct CreditConfirmation { let creditTransactionID: String; let status: 
 public struct TransactionResolution { let reference: String; let responseCode: String?; let status: String; let reason: String? }   // observeTransactionResolved payload
 public struct SaleCreditConfirmation { let reference: String; let creditTransactionID: String?; let status: String; let amountMinorUnits: Int64?; let bankReference: String?; let creditedAt: String? }   // observeCreditConfirmation payload
 public struct MerchantReceipt { let merchantName: String; let merchantAddress: String; let transactionType: String; let totalAmountMinorUnits: Int64; let totalAmountFormatted: String; let maskedToken: String; let reference: String; let transactionHash: String?; let qrPayload: String }
-public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64?; let responseCode: String; let merchantStatus: String?; let transactionID: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }   // transactions.status → VeyraLookup<[TransactionStatus]>
+public struct TransactionStatus { let merchantTransactionReference: String; let merchantID: String; let amount: Int64?; let responseCode: String; let merchantStatus: String?; let transactionID: String?; let creditTransactionID: String?; let isCreditConfirmationSupported: Bool? }   // transactionStatus(...) → VeyraLookup<[TransactionStatus]>
 ```
 
 ---
@@ -3176,6 +3271,45 @@ Camera scan ──► inspectScannedQr
                                              "connect to the internet" · DEVICE_NOT_BOUND →
                                              "add this card again on this phone"
 ```
+
+## Migrating from 3.0.0 — Setup
+
+Setup takes the same arguments in the same order on iOS, Android and React Native:
+`(customerID:, config:, provider:)`. Each `configure` returns its instance.
+
+| 3.0.0 | 3.0.1 |
+|---|---|
+| `VeyraWallet.configure(_ config, customerID:, provider:)` | `VeyraWallet.configure(customerID:config:provider:)` → `VeyraWallet` |
+| `VeyraSoftPOS.configure(_ config, customerID:, provider:)` | `VeyraSoftPOS.configure(customerID:config:provider:)` → `VeyraSoftPOS` |
+| `VeyraSDK.configure(customerID:provider:softpos:wallet:)` | `VeyraSDK.configure(customerID:config: VeyraSDKConfiguration(softpos:wallet:), provider:)` → `VeyraSDK` |
+| `VeyraSDK.shared.currentMode` (property) | `VeyraSDK.shared.currentMode()` |
+| *(none)* | `VeyraSDK.shared.wallet` / `.softpos` — the member SDKs |
+
+## Migrating from 3.0.0 — Wallet
+
+3.0.1 gives every wallet operation one name and one owner on iOS, Android and React Native. The
+operations moved from `VeyraWallet.shared.tokenisation` onto `VeyraWallet.shared` itself, and Swift
+drops the `get` prefix the other two platforms use (`tokens()` here, `getTokens()` there). Nothing
+behaves differently; only the calls change.
+
+| 3.0.0 | 3.0.1 |
+|---|---|
+| `VeyraWallet.shared.tokenisation.<call>` | `VeyraWallet.shared.<call>` — every wallet operation, including `cancelDigitise` and `cancelPayment` |
+| `tokenisation.verifyAccount(accountNumber:institutionCode:walletAccountID:accountHolderName:accountNumberSource:)` | `verifyAccount(VerifyAccountParams(...))` — `accountHolderName` is now optional |
+| `tokenisation.digitise(accountNumber:…clientRequestID:)` | `digitise(DigitiseParams(...))` |
+| `tokenisation.activeToken` (property) | `activeToken()` |
+| `VeyraWallet.shared.isPaySessionOpen` (property) | `isPaySessionOpen()` |
+| — | `token(_:)`, `hasActivationObserver(tokenUniqueReference:)` (new) |
+| `tokenisation.lukState(tokenUniqueReference:)`, `LukState` | **Removed** — use the token's `requiresOnline` (from `tokens()` / `token(_:)`) and `observeCardKeyStateChanged` |
+| `requestActivationCode(tokenUniqueReference:method:reason:)`, `ActivationMethod` | `requestActivationCode(tokenUniqueReference:medium:reason:)`, `ActivationMedium` |
+| `VeyraWallet.shared.getTransactions(tokenUniqueReference:limit:)` | `transactions(tokenUniqueReference:limit:)` |
+| `tokenisation.transactionHistory(tokenUniqueReference:limit:)` (deprecated) | **Removed** — `transactions(tokenUniqueReference:limit:)` (default `limit` 50, not 100) |
+| `tokenisation.recentActivity(tokenUniqueReference:)`, `TokenActivity` | **Removed** — `transactions(tokenUniqueReference:limit:)` has every rail |
+| `tokenisation.receipt(forTransactionHash:)` | `receiptForTransaction(_:)` |
+| `tokenisation.observeTokenLifecycle(onTokenStatusChanged:)` / `stopObservingTokenLifecycle()` | `observeTokenStatusChanged(onTokenStatusChanged:)` / `stopObservingTokenStatusChanged()` |
+| `tokenisation.observeCardKeyState(onKeyStateChanged:onDeviceNotBound:)` / `stopObservingCardKeyState()` | `observeCardKeyStateChanged(_ listener:)` — one listener receiving a `CardKeyStateEvent` (`tokenUniqueReference`, `requiresOnline`, `deviceNotBound`) / `stopObservingCardKeyStateChanged()` |
+| `observePaymentRefusals(…, onAmountExceedsCardLimit:, …)` | `observePaymentRefusals(…, onAmountExceedCardLimit:, …)` |
+| `tokenisation.topUpKeysIfNeeded()` | **Removed** — the SDK tops payment keys up itself (at `configure`, when the app becomes active, every 15 minutes and before each payment). Delete the call |
 
 ## Building with React Native?
 

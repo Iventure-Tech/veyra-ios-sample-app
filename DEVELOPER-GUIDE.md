@@ -479,7 +479,7 @@ let walletConfig = VeyraWalletConfiguration(
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
 | `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
-| `requireQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the Secure Enclave confirms the phone is unlocked. The last parameter, after `requestTimeoutSeconds`. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
+| `requireAdditionalQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the Secure Enclave confirms the phone is unlocked. The last parameter, after `requestTimeoutSeconds`. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
 
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
@@ -1776,14 +1776,14 @@ VeyraWalletConfiguration(
 ###### Skipping the sheet after a recent unlock
 
 By default the SDK shows the sheet before **every** QR payment. Pass
-`requireQrAuthenticationPrompt: false` — the last parameter, after `requestTimeoutSeconds` — to skip
+`requireAdditionalQrAuthenticationPrompt: false` — the last parameter, after `requestTimeoutSeconds` — to skip
 it when the customer has just unlocked the phone:
 
 ```swift
 VeyraWalletConfiguration(
     environment: .test,
     appleTeamID: "ABCDE12345",
-    requireQrAuthenticationPrompt: false       // default true: always ask
+    requireAdditionalQrAuthenticationPrompt: false       // default true: always ask
 )
 ```
 

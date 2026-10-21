@@ -70,7 +70,7 @@ enum SampleConfig {
                     allowedAcquirerIDs: allowedAcquirerIDs,
                     allowedMerchantIDs: allowedMerchantIDs
                     // Optional: `requestTimeoutSeconds: 30` (5–60 s), as above.
-                    // Optional, last argument (after `requestTimeoutSeconds`): `requireQrAuthenticationPrompt: false`
+                    // Optional, last argument (after `requestTimeoutSeconds`): `requireAdditionalQrAuthenticationPrompt: false`
                     // — skip the authentication sheet before a QR payment while the phone is unlocked
                     // (the Secure Enclave checks). Default true: always ask.
                 )

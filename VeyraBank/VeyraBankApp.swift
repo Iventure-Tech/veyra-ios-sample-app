@@ -69,7 +69,10 @@ enum SampleConfig {
                     appleTeamID: appleTeamID, // App Attest app id = teamID.bundleID
                     allowedAcquirerIDs: allowedAcquirerIDs,
                     allowedMerchantIDs: allowedMerchantIDs
-                    // Optional, last argument: `requestTimeoutSeconds: 30` (5–60 s), as above.
+                    // Optional: `requestTimeoutSeconds: 30` (5–60 s), as above.
+                    // Optional, last argument (after `requestTimeoutSeconds`): `requireQrAuthenticationPrompt: false`
+                    // — skip the authentication sheet before a QR payment while the phone is unlocked
+                    // (the Secure Enclave checks). Default true: always ask.
                 )
             ),
             provider: AppProvider.provider()

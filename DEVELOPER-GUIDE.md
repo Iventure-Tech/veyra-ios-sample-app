@@ -34,6 +34,7 @@ Everything the SDK keeps on the device belongs to **one customer** — the one y
 | Minimum iOS | **15.0** |
 | Swift tools | 5.9+ |
 | Device | Real device for wallet operations (App Attest does not run on the simulator); NFC-capable iPhone for tap acceptance |
+| Passcode | Required on the customer's iPhone to add a card — see [Passcode and the card's payment keys](#passcode-and-the-cards-payment-keys) |
 | Apple Developer Team ID | Required in the wallet configuration (`appleTeamID`) — device attestation binds to `teamID.bundleID` |
 
 **Info.plist keys** (as used by the sample app):
@@ -478,6 +479,7 @@ let walletConfig = VeyraWalletConfiguration(
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
 | `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
+| `requireAdditionalQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the Secure Enclave confirms the phone is unlocked. The last parameter, after `requestTimeoutSeconds`. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
 
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
@@ -1253,6 +1255,19 @@ Everything hangs off `VeyraWallet.shared` — the examples below hold it as `let
 
 Flow: `banks` → `verifyAccount` → `digitise`. On success the SDK receives, decrypts and stores the payment material on-device — the card can pay immediately (`APPROVED`) or after activation (`APPROVE_REQUIRE_AUTH`).
 
+#### Passcode and the card's payment keys
+
+The card's payment keys on the phone are protected by the Secure Enclave, which ties them to the
+device passcode:
+
+- **No passcode, no card.** An iPhone with no passcode cannot hold payment keys, so adding a card
+  fails there. Ask the customer to set a passcode first.
+- **Removing the passcode deletes the protecting keys.** iOS deletes them, and the SDK then
+  discards the cards' payment keys. Once a passcode is set again, the SDK downloads new keys
+  online — the card must go online before it can pay.
+- **Existing installs migrate silently.** On the first launch after updating the SDK, cards already
+  on the phone are moved to the hardware-protected keys — no prompt and no network.
+
 ---
 
 #### `banks`
@@ -1757,6 +1772,31 @@ VeyraWalletConfiguration(
 
 > iOS shows a **single** string in the sheet, so the *subtitle* is what the customer reads — it is
 > the one carrying the merchant and amount. Overriding only a title has no visible effect here.
+
+###### Skipping the sheet after a recent unlock
+
+By default the SDK shows the sheet before **every** QR payment. Pass
+`requireAdditionalQrAuthenticationPrompt: false` — the last parameter, after `requestTimeoutSeconds` — to skip
+it when the customer has just unlocked the phone:
+
+```swift
+VeyraWalletConfiguration(
+    environment: .test,
+    appleTeamID: "ABCDE12345",
+    requireAdditionalQrAuthenticationPrompt: false       // default true: always ask
+)
+```
+
+| Setting | Phone state | What the customer sees |
+|---|---|---|
+| `true` (default) | Any | One sheet |
+| `false` | Unlocked (Face ID, Touch ID or passcode) and a passcode is set | No sheet |
+| `false` | Not confirmed unlocked | One sheet |
+
+The check is made by the phone's secure hardware (the Secure Enclave), not by the SDK or your app.
+If it cannot confirm the unlock, the sheet is shown — once. A payment never shows more than one
+sheet. The outcomes are unchanged: `AUTH_CANCELLED`, `AUTH_FAILED` and `AUTH_UNAVAILABLE`, all
+`NOT_SENT`.
 
 > **There is no tap-to-pay on iOS**, so unlike Android this is the only place CDCVM applies.
 

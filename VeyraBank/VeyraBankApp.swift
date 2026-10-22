@@ -59,8 +59,8 @@ enum SampleConfig {
                     // the same identifier the wallet configuration carries.
                     paymentAppProviderID: paymentAppProviderID
                     // Optional, last argument: `requestTimeoutSeconds: 30` — the longest the SDK
-                    // waits for one backend call, 5–60 s. Unset keeps the SDK's own timeouts; a
-                    // payment that runs out of time ends pending, not failed.
+                    // waits for one backend call, 5–60 s. Unset means 60 s; a payment that runs
+                    // out of time ends pending, not failed.
                 ),
                 wallet: .init(
                     environment: .test,

@@ -823,7 +823,7 @@ Returns `PaymentContextQr` — an outcome. Branch on `responseStatus` (always se
 | `responseStatus` | Meaning | What to do |
 |---|---|---|
 | `APPROVED` | The QR was created — `txRef` (poll key), `mpmPayload` (**render this string verbatim as the QR**), `expiry` (ISO-8601) and `kid` are set | Render and poll |
-| `FAILED` | The gateway refused it — `responseStatusReason`, e.g. `DUPLICATE_MERCHANT_ORDER_ID`, `MERCHANT_NOT_FOUND` (see [Table D](#table-d--veyra-payment-gateway-non-payment-calls-softpos)) | `DUPLICATE_MERCHANT_ORDER_ID`: the order is already paid or being confirmed — don't take another payment for it. Otherwise fix the reason and create the QR again for the same order |
+| `FAILED` | The gateway refused it — `responseStatusReason`, e.g. `DUPLICATE_MERCHANT_ORDER_ID`, `MERCHANT_NOT_FOUND`, `DEVICE_NOT_REGISTERED` (see [Table D](#table-d--veyra-payment-gateway-non-payment-calls-softpos)) | `DUPLICATE_MERCHANT_ORDER_ID`: the order is already paid or being confirmed — don't take another payment for it. `DEVICE_NOT_REGISTERED`: this phone is not the merchant's registered device — update the merchant from it first. Otherwise fix the reason and create the QR again for the same order |
 | `PENDING` | Sent, no usable answer | Create a new QR |
 | `NOT_SENT` | Never reached the gateway (`NO_NETWORK_CONNECTION`, `INVALID_REQUEST`, `CANCELLED` after [`cancelPayment`](#cancelling-a-call), …) | Fix the reason; retry with the **same** order ID |
 
@@ -2673,7 +2673,7 @@ every status lookup. One code always means one reason.
 | `12` | `RETRY` | `QR_EXPIRED` | QR payments: the payment code expired; nothing was charged | Show a new QR for the same order |
 | `13` | `RETRY` | `AMOUNT_MISMATCH` | QR payments: amount or currency doesn't match the code; nothing was charged | Show a new QR for the same order; never re-key the amount |
 | `25` | `RETRY` | `UNABLE_TO_LOCATE_RECORD` | A status lookup found no such payment | Nothing was charged; the order can be paid, with the same order ID |
-| `30` | `RETRY` | `INVALID_REQUEST` | The gateway refused the request before sending it on; nothing was charged | Fix the request, then retry the same order |
+| `30` | `RETRY` | `INVALID_REQUEST`, or a more specific reason (`CALLER_NOT_AUTHORISED`, `DEVICE_ATTESTATION_FAILED`, `DEVICE_NOT_REGISTERED`) | The gateway refused the request before sending it on; nothing was charged | Fix the request, then retry the same order. `DEVICE_NOT_REGISTERED`: the payment came from a phone other than the merchant's registered one — update the merchant from this phone (which re-registers it), then retry |
 | `91` | `RETRY` | `ISSUER_SWITCH_NOT_AVAILABLE` | Veyra could not reach the bank; nothing was charged | Try again shortly with the same order ID |
 | `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | The order is already paid or still being confirmed; `originalPayment` carries the attempt that decided it | Do not take another payment for the order. `originalPayment.responseStatus` `PENDING`: "A payment for this order is still being confirmed"; otherwise "This order is already paid" |
 
@@ -2825,7 +2825,7 @@ a payment, says `NOT_SENT` for that.
 |---|---|---|
 | Merchant registration (`register(_:)`) | `MERCHANT_TYPE_REQUIRED`, `MERCHANT_NAME_REQUIRED`, `EMAIL_ADDRESS_REQUIRED`, `PHONE_NUMBER_REQUIRED`, `ACCOUNT_NUMBER_REQUIRED`, `ADDRESS_LINE_1_REQUIRED`, `CITY_REQUIRED`, `BANK_INSTITUTION_CODE_REQUIRED`, `PAYMENT_APP_PROVIDER_ID_REQUIRED`, `CAC_NUMBER_REQUIRED`, `BVN_REQUIRED` (no BVN, and your payment app provider is not registered as the account issuer) | Ask for the missing field |
 | Merchant update / status / activate / deactivate (`update`, `refreshStatus()`, `activate`, `deactivate`) | `MERCHANT_ID_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST` (change not allowed from the current state), `BVN_REQUIRED` (update only: the merchant would be left with no BVN, and your payment app provider is not registered as the account issuer) | Fix the request / check the merchant's state |
-| QR payment code creation (`createPaymentContext`) | `AMOUNT_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST`, `DUPLICATE_MERCHANT_ORDER_ID` (includes the original payment) | Fix the request and create the QR again for the same order. `DUPLICATE_MERCHANT_ORDER_ID`: the order is already paid or being confirmed — take no further payment for it |
+| QR payment code creation (`createPaymentContext`) | `AMOUNT_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST`, `DUPLICATE_MERCHANT_ORDER_ID` (includes the original payment), `DEVICE_NOT_REGISTERED` (not the merchant's registered phone) | Fix the request and create the QR again for the same order. `DUPLICATE_MERCHANT_ORDER_ID`: the order is already paid or being confirmed — take no further payment for it. `DEVICE_NOT_REGISTERED`: update the merchant from this phone first |
 
 #### Generic fallbacks
 

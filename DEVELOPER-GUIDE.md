@@ -452,7 +452,7 @@ let softposConfig = VeyraSoftPOSConfiguration(
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults — no URLs to supply. |
 | `paymentAppProviderID` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet configuration's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. |
-| `requestTimeoutSeconds` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
+| `requestTimeoutSeconds` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). `nil` means 60 s. See [Request timeout](#request-timeout). |
 
 ### `VeyraWalletConfiguration`
 
@@ -478,7 +478,7 @@ let walletConfig = VeyraWalletConfiguration(
 | `appleTeamID` | **Mandatory** | Your app's Apple Developer Team ID (e.g. `"ABCDE12345"`). Together with the bundle ID (always detected from `Bundle.main` — there is no parameter for it) it forms the App Attest app ID (`teamID.bundleID`) that device attestation binds to and the backend verifies — it attests **your** app, so this is your team, not Veyra's. Digitise fails fast if missing. |
 | `appVersion` | Optional | App version reported during digitise. Default `"1.0.0"`. |
 | `allowedAcquirerIDs` / `allowedMerchantIDs` | Optional | Provision-context allow-lists your app decides. |
-| `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). `nil` keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
+| `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). `nil` means 60 s. See [Request timeout](#request-timeout). |
 | `requireAdditionalQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the Secure Enclave confirms the phone is unlocked. The last parameter, after `requestTimeoutSeconds`. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
 
 > There is **no** `paymentApplicationInstanceID` parameter — the SDK mints and persists an install-scoped one and sends it on every eligibility/digitise request; read it via `VeyraWallet.shared.paymentApplicationInstanceID()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
@@ -500,7 +500,9 @@ let walletConfig = VeyraWalletConfiguration(
 
 - **Allowed values: 5 to 60.** Anything else makes `configure` throw `invalidConfiguration`,
   naming the value and the range. The SDK never adjusts the value.
-- **Not set:** the SDK keeps its own timeout of 60 s per call.
+- **Not set:** 60 seconds, for every call.
+- **It is the limit for the whole call.** Connecting, sending and waiting for the answer all
+  count towards the same limit, so a call never takes longer than the value you set.
 - **It applies to every backend call the SDK makes,** including the token request and calls
   through a `VeyraProxyProvider` (your backend's relay is given the same time limit). It does not
   change the NFC scan timeouts or the card-activation wait.

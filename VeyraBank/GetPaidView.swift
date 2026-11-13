@@ -62,6 +62,17 @@ struct GetPaidView: View {
     private enum CreditConfirmState { case waiting, received, unable }
     @State private var creditConfirmState: CreditConfirmState?
     @State private var creditWatchTask: Task<Void, Never>?
+    // An ACCEPTED sale on the result page: the customer was debited and the credit to the
+    // merchant's bank is queued. It is not final, so the page says "wait for approval before
+    // releasing goods", offers no receipt and no credit confirmation, and does not auto-return.
+    // The SDK keeps checking whatever screen is up; this screen only re-reads the stored row and
+    // shows the final status in place when the row has one (see `watchAcceptedPayment`).
+    private enum AcceptedState: Equatable {
+        case waiting
+        case settled(status: String, reason: String?)
+    }
+    @State private var acceptedState: AcceptedState?
+    @State private var acceptedWatchTask: Task<Void, Never>?
     @State private var customerQrScanHint: String?
     @State private var merchant: StoredMerchant?
     @State private var amountText = ""
@@ -71,6 +82,8 @@ struct GetPaidView: View {
         case live(UIImage)
         case failed(String)
         case settled(approved: Bool, responseCode: String?)
+        /// The push was accepted (customer debited, credit queued): the QR is down, not final yet.
+        case accepted
     }
     @State private var qrState: QrState = .creating
     @State private var qrTask: Task<Void, Never>?
@@ -84,7 +97,7 @@ struct GetPaidView: View {
     @State private var tapState: TapState = .waiting
     @State private var tapHint: String?
     // The retry rule for your order ID: an order can have several attempts. After NOT_SENT, RETRY,
-    // DECLINED or FAILED no money moved, so the retry reuses it; after APPROVED or PENDING (or a
+    // DECLINED or FAILED no money moved, so the retry reuses it; after APPROVED, ACCEPTED or PENDING (or a
     // status this build does not know) the order is paid or may be, so the next sale takes a fresh one.
     @State private var retryOrderID: String?
     @State private var currentOrderID = ""
@@ -159,7 +172,7 @@ struct GetPaidView: View {
     /// so the sheet isn't dismissed under the merchant; failures alert, never a dead tap.
     @ViewBuilder
     private var viewReceiptButton: some View {
-        if let reference = lastPaymentReference {
+        if let reference = lastPaymentReference, acceptedState != .waiting {
             Button("View receipt") {
                 autoReturnTask?.cancel()
                 Task { @MainActor in
@@ -355,6 +368,34 @@ struct GetPaidView: View {
                     }
                     viewReceiptButton
                 }
+            case .accepted:
+                if let outcome = acceptedOutcome {
+                    VStack(spacing: 8) {
+                        Image(systemName: outcome.icon)
+                            .font(.system(size: 64))
+                            .foregroundStyle(outcome.color)
+                        Text(outcome.title)
+                            .font(.title3).bold()
+                            .foregroundStyle(.white)
+                        Text(outcome.message)
+                            .font(.footnote).foregroundStyle(.gray)
+                            .multilineTextAlignment(.center).padding(.horizontal)
+                        switch creditConfirmState {
+                        case .waiting:
+                            Text("Confirming credit with merchant bank…")
+                                .font(.footnote).foregroundStyle(.orange)
+                        case .received:
+                            Text("Funds received by merchant bank")
+                                .font(.footnote).foregroundStyle(.green)
+                        case .unable:
+                            Text("Bank credit could not be confirmed")
+                                .font(.footnote).foregroundStyle(.red)
+                        case nil:
+                            EmptyView()
+                        }
+                        viewReceiptButton
+                    }
+                }
             }
             Spacer()
             if let cancelNote, case .creating = qrState {
@@ -395,7 +436,7 @@ struct GetPaidView: View {
     /// Terminal QR outcomes (settled either way, expired, create failed) — Done + auto-return.
     private var qrFinished: Bool {
         switch qrState {
-        case .settled, .failed: return true
+        case .settled, .failed, .accepted: return true
         case .creating, .live: return false
         }
     }
@@ -408,6 +449,7 @@ struct GetPaidView: View {
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
+        acceptedState = nil
         guard merchant != nil else {
             qrState = .failed("Register as a merchant first")
             scheduleAutoReturn()
@@ -482,6 +524,17 @@ struct GetPaidView: View {
                         }
                         break
                     }
+                    // Not settled. The customer's bank may have accepted the push (debited,
+                    // credit queued): the SDK puts that on the stored row, so read it. The QR
+                    // comes down and the page waits for the final status.
+                    let row = try? await VeyraSoftPOS.shared.transaction(merchantTransactionReference: txRef)
+                    if row?.status == ResponseStatus.accepted {
+                        lastPaymentReference = txRef
+                        VeyraSoftPOS.shared.cancelQrExpiry()
+                        qrState = .accepted
+                        watchAcceptedPayment(reference: txRef)
+                        break
+                    }
                     if status.state == "EXPIRED" {
                         qrState = .failed("This payment code has expired — please start a new payment")
                         scheduleAutoReturn()
@@ -523,8 +576,9 @@ struct GetPaidView: View {
             case .result(let result):
                 // Map the kernel outcome to a merchant-facing result — never surface
                 // the raw server/kernel error string.
-                let outcome = TapOutcome(status: result.responseStatus, reason: result.responseStatusReason,
-                                         originalStatus: result.originalPayment?.responseStatus)
+                let outcome = acceptedOutcome
+                    ?? TapOutcome(status: result.responseStatus, reason: result.responseStatusReason,
+                                  originalStatus: result.originalPayment?.responseStatus)
                 Image(systemName: outcome.icon)
                     .font(.system(size: 64))
                     .foregroundStyle(outcome.color)
@@ -617,6 +671,7 @@ struct GetPaidView: View {
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
+        acceptedState = nil
         let request = TapRequest(
             amountMinorUnits: amountMinorUnits ?? 0,
             // Your own order id — required; reused to retry an attempt that moved no money (NOT_SENT,
@@ -661,6 +716,11 @@ struct GetPaidView: View {
                 // An approved tap carries the credit facts, so it enters the same "confirming
                 // credit" wait as the QR rails. The watch renders the stored row and owns only
                 // this result's hold — the polling is the SDK's, app-scoped.
+                // Accepted is not final: no hold, no receipt, no credit confirmation. Wait.
+                if result.responseStatus == ResponseStatus.accepted {
+                    watchAcceptedPayment(reference: result.merchantTransactionReference)
+                    return
+                }
                 scheduleAutoReturn()
                 if result.responseStatus == "APPROVED", let reference = result.merchantTransactionReference {
                     watchCreditConfirmation(
@@ -792,6 +852,7 @@ struct GetPaidView: View {
         lastPaymentReference = nil
         stopCreditConfirmationWatch()
         creditConfirmState = nil
+        acceptedState = nil
         Task { @MainActor in
             do {
                 let outcome = try await VeyraSoftPOS.shared.chargeCustomerQr(
@@ -820,6 +881,11 @@ struct GetPaidView: View {
                 // render the stored row until the answer lands. The 60s hold is armed for every
                 // terminal outcome; watchCreditConfirmation cancels it while the sale is waiting
                 // and starts a fresh one once the answer is displayed.
+                // Accepted is not final: no hold, no receipt, no credit confirmation. Wait.
+                if outcome.responseStatus == ResponseStatus.accepted {
+                    watchAcceptedPayment(reference: outcome.merchantTransactionReference)
+                    return
+                }
                 scheduleAutoReturn()
                 if outcome.approved {
                     watchCreditConfirmation(
@@ -881,7 +947,51 @@ struct GetPaidView: View {
         }
     }
 
+    /// What an accepted sale shows: the wait, then its final status once the stored row has one.
+    private var acceptedOutcome: TapOutcome? {
+        switch acceptedState {
+        case .waiting: return TapOutcome(status: ResponseStatus.accepted)
+        case .settled(let status, let reason): return TapOutcome(status: status, reason: reason)
+        case nil: return nil
+        }
+    }
+
+    /// ACCEPTED, on every rail: hold the result (no auto-return) and re-read the sale's stored row
+    /// every few seconds until it is final: `APPROVED` (the credit went through; the receipt and
+    /// credit confirmation become available) or `FAILED` / `CREDIT_FAILED` (the credit failed and
+    /// the debit was reversed). Render-only: the SDK owns the checking and keeps at it when this
+    /// screen is gone, and the transactions list shows the same row.
+    private func watchAcceptedPayment(reference: String?) {
+        acceptedWatchTask?.cancel()
+        acceptedState = .waiting
+        cancelAutoReturn()
+        guard let reference, !reference.isEmpty else { return }
+        acceptedWatchTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled else { return }
+                guard let row = try? await VeyraSoftPOS.shared.transaction(merchantTransactionReference: reference),
+                      [ResponseStatus.approved, ResponseStatus.declined, ResponseStatus.failed, ResponseStatus.retry]
+                        .contains(row.status) else { continue }
+                acceptedWatchTask = nil
+                acceptedState = .settled(status: row.status, reason: row.responseStatusReason)
+                // The final status is on screen: start the normal hold from here.
+                scheduleAutoReturn()
+                if row.status == ResponseStatus.approved {
+                    watchCreditConfirmation(
+                        reference: reference,
+                        initialWaiting: row.isCreditConfirmationSupported == true
+                    )
+                }
+                return
+            }
+        }
+    }
+
     private func stopCreditConfirmationWatch() {
+        // Leaving a result also ends its accepted-sale watch (rendering only, like the one below).
+        acceptedWatchTask?.cancel()
+        acceptedWatchTask = nil
         creditWatchTask?.cancel()
         creditWatchTask = nil
         // Only this screen's observer goes; the SDK's app-scoped polling is untouched.
@@ -890,14 +1000,16 @@ struct GetPaidView: View {
 
     private func customerQrResult(_ approved: Bool, _ detail: String?) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: approved ? "checkmark.circle.fill" : "xmark.circle.fill")
+            // An accepted sale shows its wait, then its final status, in place of the charge's answer.
+            Image(systemName: acceptedOutcome?.icon ?? (approved ? "checkmark.circle.fill" : "xmark.circle.fill"))
                 .font(.system(size: 64))
-                .foregroundStyle(approved ? .green : .red)
-            Text(approved ? "Payment successful" : "Payment declined")
+                .foregroundStyle(acceptedOutcome?.color ?? (approved ? Color.green : Color.red))
+            Text(acceptedOutcome?.title ?? (approved ? "Payment successful" : "Payment declined"))
                 .font(.title3).bold()
                 .foregroundStyle(.white)
-            if let detail {
+            if let detail = acceptedOutcome?.message ?? detail {
                 Text(detail).font(.footnote).foregroundStyle(.gray)
+                    .multilineTextAlignment(.center).padding(.horizontal)
             }
             // Beneficiary credit confirmation — waits, then flips when the SDK's
             // sweep learns the merchant's bank received the funds.
@@ -981,9 +1093,15 @@ struct GetPaidView: View {
 /// What to tell the merchant when the order ID is already on another payment, from that payment's
 /// status. Never "try again": the order is paid, or a payment for it is still being confirmed.
 func duplicateOrderMessage(originalStatus: String?) -> String {
-    originalStatus == ResponseStatus.pending
-        ? "A payment for this order is still being confirmed - do not take another payment"
-        : "This order is already paid - do not take another payment"
+    switch originalStatus {
+    case ResponseStatus.pending:
+        return "A payment for this order is still being confirmed - do not take another payment"
+    case ResponseStatus.accepted:
+        // The customer was debited and the credit is queued: not paid yet, and never retried.
+        return "A payment for this order is accepted and waiting for approval - do not take another payment"
+    default:
+        return "This order is already paid - do not take another payment"
+    }
 }
 
 /// Merchant-facing mapping of a tap's `TransactionStatus` — icon, colour, and copy for
@@ -1008,6 +1126,18 @@ private struct TapOutcome {
             message = reason == "NO_NETWORK_CONNECTION"
                 ? "No internet connection — connect and try again. Nothing was charged."
                 : "Nothing was charged (\(reason ?? "not sent")). Try again."
+        case "ACCEPTED":
+            // The customer was debited and the credit to the merchant's bank is queued. Not final:
+            // the SDK keeps checking, and the merchant waits for the approval.
+            icon = "clock.fill"; color = .orange
+            title = "Payment accepted"
+            message = "Customer debited. Wait for approval before releasing goods. "
+                + "Not final yet - the app keeps checking and will show the result here."
+        case "FAILED" where reason == "CREDIT_FAILED":
+            // An accepted payment whose credit failed: the customer's debit was reversed.
+            icon = "xmark.circle.fill"; color = .red
+            title = "Payment failed"
+            message = "The credit to the merchant's bank failed and the customer's debit was reversed (CREDIT_FAILED)."
         case "APPROVED":
             icon = "checkmark.circle.fill"; color = .green
             title = "Payment successful"; message = "The customer's payment was approved."

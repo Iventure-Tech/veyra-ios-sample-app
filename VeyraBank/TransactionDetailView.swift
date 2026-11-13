@@ -331,7 +331,9 @@ struct TransactionDetailView: View {
             let stated = fresh?.authorizationStatus?
                 .trimmingCharacters(in: .whitespaces).uppercased() ?? ""
             if !["APPROVED", "DECLINED", "FAILED"].contains(stated) {
-                statusCheckNote = "Still processing — the wallet will keep checking."
+                statusCheckNote = stated == ResponseStatus.accepted
+                    ? "Payment accepted - waiting for credit approval. The wallet will keep checking."
+                    : "Still processing — the wallet will keep checking."
             }
         } catch {
             statusCheckNote = "Could not check right now: \(error.localizedDescription)"
@@ -439,6 +441,8 @@ struct TransactionDetailView: View {
         case "DECLINED": return "Declined"
         case "FAILED": return "Failed"
         case "PENDING": return "Pending"
+        // Debited; the credit to the merchant's bank is queued. Not final.
+        case "ACCEPTED": return "Accepted"
         default: return "—"
         }
     }
@@ -447,7 +451,7 @@ struct TransactionDetailView: View {
         switch liveRow.authorizationStatus {
         case "APPROVED": return .green
         case "DECLINED", "FAILED": return Brand.crimson
-        case "PENDING": return .orange
+        case "PENDING", "ACCEPTED": return .orange
         default: return .secondary
         }
     }

@@ -85,6 +85,8 @@ struct TransactionsView: View {
         case "DECLINED": return "Declined"
         case "FAILED": return "Failed"
         case "PENDING": return "Pending"
+        // Debited; the credit to the merchant's bank is queued. Not final.
+        case "ACCEPTED": return "Accepted"
         default: return "—"
         }
     }
@@ -93,7 +95,7 @@ struct TransactionsView: View {
         switch status {
         case "APPROVED": return .green
         case "DECLINED", "FAILED": return Brand.crimson
-        case "PENDING": return .orange
+        case "PENDING", "ACCEPTED": return .orange
         default: return .secondary
         }
     }

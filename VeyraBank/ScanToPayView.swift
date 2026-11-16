@@ -21,12 +21,15 @@ struct ScanToPayView: View {
     /// third is neither of the first two. Anything not stated final is pending, which is also what
     /// the SDK stored and keeps polling for.
     enum ResultState {
-        case approved, pending, refused
+        case approved, pending, accepted, refused
 
         init(responseStatus: String?) {
             switch responseStatus?.trimmingCharacters(in: .whitespaces).uppercased() {
             case "APPROVED": self = .approved
             case "DECLINED", "FAILED": self = .refused
+            // Debited; the credit to the merchant's bank is queued. Not final: the SDK keeps
+            // checking and the row becomes APPROVED, or FAILED when the credit fails.
+            case "ACCEPTED": self = .accepted
             default: self = .pending
             }
         }
@@ -206,6 +209,13 @@ struct ScanToPayView: View {
                         detail: "The bank has not confirmed this yet (\(outcome.responseStatusReason ?? outcome.responseCode ?? "no code")). "
                             + "It will appear in your transactions once it settles — don't pay again."
                     )
+                case .accepted:
+                    stage = .result(
+                        state: state, headline: "Payment accepted",
+                        detail: (outcome.message ?? "Payment accepted - waiting for credit approval")
+                            + ". You have been debited and the merchant's bank is being credited. "
+                            + "Don't pay again - the result will show in your transactions."
+                    )
                 case .refused:
                     stage = .result(
                         state: state, headline: "Payment declined",
@@ -264,7 +274,7 @@ struct ScanToPayView: View {
     private func resultSymbol(_ state: ResultState) -> String {
         switch state {
         case .approved: return "checkmark.circle.fill"
-        case .pending: return "clock.fill"
+        case .pending, .accepted: return "clock.fill"
         case .refused: return "xmark.circle.fill"
         }
     }
@@ -272,7 +282,7 @@ struct ScanToPayView: View {
     private func resultTint(_ state: ResultState) -> Color {
         switch state {
         case .approved: return .green
-        case .pending: return .orange
+        case .pending, .accepted: return .orange
         case .refused: return Brand.crimson
         }
     }

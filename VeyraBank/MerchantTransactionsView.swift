@@ -105,6 +105,8 @@ struct MerchantTransactionsView: View {
                     text = "Paid — do not take another payment for this order."
                 case ResponseStatus.pending:
                     text = "A payment may still be going through — do not take another payment yet."
+                case ResponseStatus.accepted:
+                    text = "A payment is accepted and waiting for approval — do not take another payment, and do not release goods yet."
                 default:
                     text = "Not paid (\(order.responseStatus)\(order.responseStatusReason.map { " · \($0)" } ?? "")) — you can take a payment with the same order id."
                 }
@@ -213,6 +215,12 @@ struct MerchantTransactionsView: View {
                 // a settled row has nothing left to ask. It lives on the row because this list *is*
                 // the merchant's transaction detail on iOS. It is the documented route to an answer
                 // past the SDK's 30-day give-up.
+                // Accepted: the customer was debited and the credit is queued. Not final, so no
+                // receipt and no credit check yet; the row says what the merchant must do.
+                if tx.status == ResponseStatus.accepted {
+                    Text("Customer debited. Wait for approval before releasing goods.")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
                 if Self.canCheckStatus(tx) {
                     if checkingStatus == tx.merchantTransactionReference {
                         HStack(spacing: 6) {
@@ -261,7 +269,7 @@ struct MerchantTransactionsView: View {
     /// Only a still-`PENDING` sale has an outcome left to ask about. A settled row is deliberately
     /// excluded — offering the action would imply the outcome could still change.
     private static func canCheckStatus(_ tx: MerchantTransaction) -> Bool {
-        tx.status == "PENDING"
+        tx.status == "PENDING" || tx.status == ResponseStatus.accepted
     }
 
     /// Ask now. A resolving answer is written to the SDK's store and re-read here so the row
@@ -288,6 +296,8 @@ struct MerchantTransactionsView: View {
             }
             if fresh?.status == "PENDING" {
                 statusCheckNotes[reference] = "Still processing — the SDK will keep checking."
+            } else if fresh?.status == ResponseStatus.accepted {
+                statusCheckNotes[reference] = "Accepted - still waiting for credit approval. The SDK will keep checking."
             }
         } catch {
             statusCheckNotes[reference] = "Could not check right now: \(error.localizedDescription)"
@@ -350,6 +360,8 @@ struct MerchantTransactionsView: View {
         case "APPROVED": return .green
         // RETRY: final, nothing was charged; the same order ID can be used again.
         case "DECLINED", "FAILED", "RETRY": return .red
+        // Still open: PENDING (outcome unknown) and ACCEPTED (debited, credit queued).
+        case "PENDING", "ACCEPTED": return .yellow
         default: return .yellow
         }
     }

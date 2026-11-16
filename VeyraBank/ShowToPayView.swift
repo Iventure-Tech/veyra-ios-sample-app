@@ -19,6 +19,9 @@ struct ShowToPayView: View {
     @State private var errorMessage: String?
     @State private var secondsLeft: Int = 0
     @State private var expired = false
+    // The merchant charged this QR and the bank accepted it: debited, credit queued. Not final,
+    // but the QR is used, so it comes down while the wait for the final status continues.
+    @State private var accepted = false
     // The outcome arrives via the gateway reconcile — poll while the QR is
     // up instead of waiting for a scene-active/Transactions-list visit that may never come.
     @State private var reconcileTask: Task<Void, Never>?
@@ -83,11 +86,11 @@ struct ShowToPayView: View {
             // device could scan a no-longer-valid code. Swap the payload for an opaque placeholder
             // so nothing decodable remains on screen.
             Group {
-                if expired || settled != nil {
+                if expired || settled != nil || accepted {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color(uiColor: .secondarySystemBackground))
-                        Image(systemName: settled != nil ? "checkmark.circle" : "clock.badge.xmark")
+                        Image(systemName: settled != nil ? "checkmark.circle" : accepted ? "clock" : "clock.badge.xmark")
                             .font(.system(size: 48))
                             .foregroundStyle(.secondary)
                     }
@@ -110,6 +113,10 @@ struct ShowToPayView: View {
                 )
                 .font(.headline)
                 .foregroundStyle(settled.approved ? .green : Brand.crimson)
+            } else if accepted {
+                Label("Payment accepted - waiting for credit approval", systemImage: "clock.fill")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
             } else {
                 Text(expired ? "Expired — get a new QR" : "Expires in \(secondsLeft)s")
                     .font(.footnote)
@@ -177,6 +184,7 @@ struct ShowToPayView: View {
             }
             expired = false
             settled = nil
+            accepted = false
             phase = .showing(qr, image)
             startReconcilePolling(for: qr)
         } catch {
@@ -197,7 +205,7 @@ struct ShowToPayView: View {
         // this QR can settle the display.
         guard let hash = qr.transactionHash else { return }
         reconcileTask = Task { @MainActor in
-            while !Task.isCancelled && settled == nil && !expired {
+            while !Task.isCancelled && settled == nil && (!expired || accepted) {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !Task.isCancelled else { return }
                 // A check that could not be made carries a failureReason; this loop just asks again.
@@ -206,7 +214,12 @@ struct ShowToPayView: View {
                     // The row stays PENDING until the merchant charges — only a final status
                     // settles the display; anything else keeps the QR up and polling.
                     let status = row.authorizationStatus,
-                    ["APPROVED", "DECLINED", "FAILED"].contains(status.uppercased()) {
+                    ["APPROVED", "DECLINED", "FAILED", "ACCEPTED"].contains(status.uppercased()) {
+                    // ACCEPTED is not final: say so, and keep asking until the final status.
+                    if status.uppercased() == ResponseStatus.accepted {
+                        accepted = true
+                        continue
+                    }
                     // Don't display the pre-backfill placeholder as a merchant name.
                     let name = row.merchantName == "QR payment" ? nil : row.merchantName
                     settled = (approved: status == "APPROVED", merchantName: name)

@@ -497,6 +497,7 @@ struct WalletReceiptDetailView: View {
                     if let card = receipt.maskedToken, !card.isEmpty { row("Card", card) }
                     if let ref = receipt.merchantTransactionReference, !ref.isEmpty { row("Reference", ref) }
                     if let txnId = receipt.transactionID, !txnId.isEmpty { row("Transaction ID", txnId) }
+                    if let creditId = receipt.creditTransactionID, !creditId.isEmpty { row("Credit transaction ID", creditId) }
                     if let cdcvm = cdcvmText { row("Verification", cdcvm) }
                 }
             }

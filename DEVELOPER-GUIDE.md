@@ -1856,6 +1856,8 @@ default: showPending(outcome.responseStatusReason ?? outcome.responseCode)
 | `receipts(limit:)` | Stored receipts, most recent first | `[TransactionReceipt]` |
 | `receiptForTransaction(_:)` | The receipt linked to a payment, or `nil` | `TransactionReceipt?` |
 
+A `TransactionReceipt` carries `creditTransactionID`: the merchant's credit identifier (NIP session id inter-bank, batch reference intra-bank), when known. The SDK takes it from the wallet's own record of the payment and, failing that, from the merchant's receipt QR; it is `nil` when neither knows it. A receipt whose credit id disagrees with the wallet's record is refused `RECEIPT_MISMATCH`.
+
 #### `transactions`
 
 The card's full local history across every rail iOS has (scanned QR, shown QR), most recent first. No network call. Empty when no card on this device has that reference, or the card has no payments yet. Android's and React Native's `getTransactions`, with the same default (`limit: 50`).
@@ -1993,7 +1995,7 @@ The receipt is checked and stored **on the phone** — nothing is sent. `process
 | `APPROVED` | — | The receipt belongs to a payment this wallet made, agrees with it, and is stored in `receipt` | Show it |
 | `FAILED` | `INVALID_RECEIPT` | Not a Veyra receipt QR, or one with a missing or unreadable field | "Not a receipt" — let them scan again |
 | `FAILED` | `RECEIPT_NOT_FROM_THIS_WALLET` | No payment made by this wallet matches it | Tell the customer it isn't theirs |
-| `FAILED` | `RECEIPT_MISMATCH` | It matches a payment, but its amount, currency, date, merchant or reference disagree with this wallet's record | Show the reason; don't store it |
+| `FAILED` | `RECEIPT_MISMATCH` | It matches a payment, but its amount, currency, date, merchant, reference or credit transaction id disagree with this wallet's record | Show the reason; don't store it |
 | `FAILED` | `PAYMENT_NOT_CONFIRMED` | The matching payment's outcome is not confirmed yet | Ask them to scan again shortly |
 | `FAILED` | `RECEIPT_FOR_ANOTHER_TRANSACTION` | A scoped scan (`expectedTransactionHash` set) read a receipt for another transaction | Open the right transaction, or scan unscoped |
 | `FAILED` | `SDK_INTERNAL_ERROR` | The SDK failed inside itself | Report to support |
@@ -3347,6 +3349,7 @@ public struct TransactionReceipt {
     let maskedToken: String?; let merchantTransactionReference: String?
     let cdcvmApprovedByWallet: Bool?; let cdcvmOutcome: String?
     let transactionID: String?; let transactionHash: String?
+    let creditTransactionID: String?        // the merchant's credit id, when known
 }
 
 // SoftPOS side:

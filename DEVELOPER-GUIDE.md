@@ -2871,6 +2871,14 @@ queue the credit to the merchant's bank, and say so. The payment then comes back
 **`ACCEPTED` is not final.** It says more than `PENDING` does (the debit is done; only the credit is
 outstanding), but the sale is not complete until the payment is `APPROVED`.
 
+**`ACCEPTED` is not `PENDING`.** `PENDING` means the outcome is unknown: the customer may or may not
+have been debited. `ACCEPTED` means the outcome so far is known: the debit happened and only the
+credit is outstanding.
+
+**Expect it on inter-bank payments.** `ACCEPTED` arises where the customer's bank and the merchant's
+bank differ and the credit travels through the inter-bank network. A payment within one bank is
+normally settled in one step and does not answer `ACCEPTED`.
+
 - **Where you see it.** On every payment result: the card tap (`tap.start`), `chargeCustomerQr`, a merchant
   QR (below) and the wallet's `payScannedContext` (`approved` is `false`). Also on history rows
   (`MerchantTransaction.status`, the wallet's `authorizationStatus`), `paymentStatus(merchantOrderID:)`

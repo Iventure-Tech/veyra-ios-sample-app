@@ -863,6 +863,38 @@ while !Task.isCancelled {
 
 ---
 
+#### If the same QR is scanned again
+
+A merchant QR pays **once**. The first scan that reaches the gateway claims the QR, and every later
+scan of it is answered from that first payment. **A later scan never charges again.** What it gets
+depends on how the first payment ended:
+
+| First payment ended | The QR afterwards (`softpos.contextStatus(txRef:)`) | A later scan of the same QR |
+|---|---|---|
+| `APPROVED` | `APPROVED`: paid | Answered with the first payment's approval and transaction id. Nothing new is sent to the bank. |
+| `DECLINED` or `FAILED` | `DECLINED`: used | Answered with the first payment's refusal (same code and reason). Nothing is sent to the bank. To try again, show a **new QR** for the same order id. |
+| `RETRY` (the gateway never sent it to the bank) | Back to `PENDING` while unexpired; `EXPIRED` after | A new payment, as if the first had not happened. Once the QR has expired: `RETRY` / `12` / `QR_EXPIRED`. |
+| `NOT_SENT` (refused on the phone) | Unchanged: `PENDING` | A new payment. The gateway never saw the first one. |
+| `PENDING` (outcome not known yet) or `ACCEPTED` (debited, credit queued) | `IN_FLIGHT`: locked | Answered with the first payment's current status (`PENDING` until it resolves) and transaction id. It is **not** paid again. |
+
+**When a `PENDING` payment resolves**, the gateway updates the QR. Approved becomes
+`APPROVED`; declined or failed becomes `DECLINED`. If it turns out the payment was never
+sent to the bank, the QR goes back to `PENDING` (or `EXPIRED`) and can be paid again. Until
+then the QR stays locked, so an unknown outcome can never lead to a second debit.
+
+What this means for your app:
+
+- **Merchant (`softpos.contextStatus(txRef:)`).** Keep polling while the state is `PENDING` or `IN_FLIGHT`.
+  `IN_FLIGHT` can go back to `PENDING` when a payment ended `RETRY`, because the QR is
+  payable again, so keep it on screen. On `DECLINED`, take the QR down: it can't be paid again.
+  Create a new QR with `createPaymentContext` for the same order id. That is allowed after a decline,
+  failure or retry; it is refused with `94` / `DUPLICATE_MERCHANT_ORDER_ID` only while the order
+  is `APPROVED`, `ACCEPTED` or `PENDING`.
+- **Wallet (`wallet.payScannedContext(_:)`).** Most `RETRY` answers leave the QR payable, so the customer can pay
+  it again. Three mean that **this QR can't be paid as presented**; ask the merchant for a new code
+  instead: `12` / `QR_EXPIRED` (the QR expired), `13` / `AMOUNT_MISMATCH`, and `30` /
+  `INVALID_REQUEST` (the QR was already used, or its payload was not valid).
+
 #### Charge a customer QR (consumer-presented)
 
 The customer shows a payment QR from their Veyra wallet; the merchant scans it, **confirms the QR's own amount** (the amount is bound inside the QR's cryptogram — it is never keyed on the merchant side), and charges.
@@ -1816,7 +1848,7 @@ sheet itself first (above). Whatever the gateway states — approved, declined, 
 
 **`NOT_SENT` means nothing was sent** — pay the same QR again once the reason is fixed: `AUTH_CANCELLED` (the customer dismissed the sheet), `AUTH_FAILED`, `AUTH_UNAVAILABLE` (no passcode or biometry), `ONLINE_REQUIRED`, `AMOUNT_EXCEEDS_CARD_LIMIT`, `TOKEN_NOT_ACTIVE`, `DEVICE_NOT_BOUND`, `NO_ACTIVE_CARD`, `CARD_CANNOT_PAY`, `NO_NETWORK_CONNECTION`, `SDK_UNABLE_TO_CONNECT`, `NOT_AUTHENTICATED`, `SDK_INTERNAL_ERROR`, `CANCELLED` (your [`cancelPayment`](#cancelling-a-call) stopped it — go back).
 
-**`RETRY` also means nothing was charged** — the gateway received the payment but never sent it to the bank. Show the reason: for `QR_EXPIRED` or `AMOUNT_MISMATCH` ask the merchant for a fresh code; otherwise (`NAME_ENQUIRY_FAILED`, `ISSUER_SWITCH_NOT_AVAILABLE`, …) the customer can try again.
+**`RETRY` also means nothing was charged** — the gateway received the payment but never sent it to the bank. Show the reason: for `QR_EXPIRED`, `AMOUNT_MISMATCH` or `INVALID_REQUEST` (the QR was already used, or its payload was not valid) ask the merchant for a fresh code; otherwise (`NAME_ENQUIRY_FAILED`, `ISSUER_SWITCH_NOT_AVAILABLE`, …) the customer can try again. A merchant QR pays only once; see [If the same QR is scanned again](#if-the-same-qr-is-scanned-again).
 
 ```swift
 let outcome = try await wallet.payScannedContext(payment)

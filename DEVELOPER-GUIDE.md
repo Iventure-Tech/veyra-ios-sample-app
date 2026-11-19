@@ -865,17 +865,30 @@ while !Task.isCancelled {
 
 #### If the same QR is scanned again
 
-A merchant QR pays **once**. The first scan that reaches the gateway claims the QR, and every later
-scan of it is answered from that first payment. **A later scan never charges again.** What it gets
-depends on how the first payment ended:
+A merchant QR pays **once**. The first scan that reaches the gateway claims the QR **for the card
+that paid it**. **A later scan never charges again.** If the **same card** scans it again, it is
+answered from that first payment; what it gets depends on how the first payment ended (table below).
+A **different card** is refused (see [A different card scans a used QR](#a-different-card-scans-a-used-qr)).
 
-| First payment ended | The QR afterwards (`softpos.contextStatus(txRef:)`) | A later scan of the same QR |
+| First payment ended | The QR afterwards (`softpos.contextStatus(txRef:)`) | The same card scans it again |
 |---|---|---|
 | `APPROVED` | `APPROVED`: paid | Answered with the first payment's approval and transaction id. Nothing new is sent to the bank. |
 | `DECLINED` or `FAILED` | `DECLINED`: used | Answered with the first payment's refusal (same code and reason). Nothing is sent to the bank. To try again, show a **new QR** for the same order id. |
 | `RETRY` (the gateway never sent it to the bank) | Back to `PENDING` while unexpired; `EXPIRED` after | A new payment, as if the first had not happened. Once the QR has expired: `RETRY` / `12` / `QR_EXPIRED`. |
 | `NOT_SENT` (refused on the phone) | Unchanged: `PENDING` | A new payment. The gateway never saw the first one. |
 | `PENDING` (outcome not known yet) or `ACCEPTED` (debited, credit queued) | `IN_FLIGHT`: locked | Answered with the first payment's current status (`PENDING` until it resolves) and transaction id. It is **not** paid again. |
+
+##### A different card scans a used QR
+
+While the QR is claimed by another card, whether that payment is still in progress or has already
+ended (`APPROVED`, `DECLINED`, `FAILED`, `PENDING` or `ACCEPTED`), a scan with any other card is
+refused: `RETRY` / `30` / `INVALID_REQUEST`, message "Payment context already used". Nothing is
+sent to the bank, nothing is charged, and nothing about the other customer's payment is returned.
+The refused card's history records the attempt as not sent to the bank. Ask the merchant for a new
+QR.
+
+Once a QR is free again (the first payment ended `RETRY` or `NOT_SENT` and the QR has not
+expired), any card can pay it.
 
 **When a `PENDING` payment resolves**, the gateway updates the QR. Approved becomes
 `APPROVED`; declined or failed becomes `DECLINED`. If it turns out the payment was never

@@ -387,7 +387,7 @@ struct PayView: View {
     /// keys) or the issuer has suspended it (polled status; unfreezes on a later ACTIVE poll).
     private func activeCardBlocked(_ cards: [Token]) -> Bool {
         guard let active = cards.first(where: { $0.isSelected }) else { return false }
-        return active.requiresOnline || active.status == .suspended
+        return active.requiresOnline || active.cardDataMissing || active.status == .suspended
     }
 
     /// Subscribe to the two card-state pushes.
@@ -439,6 +439,13 @@ private struct CardFace: View {
                 if isSuspended {
                     // Issuer-side suspension — non-payable until polled ACTIVE again.
                     Text("Suspended")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.red.opacity(0.85), in: Capsule())
+                        .foregroundStyle(.white)
+                } else if card.cardDataMissing {
+                    // The card's payment data is not on this phone: remove it and add it again.
+                    Text("Remove and add again")
                         .font(.caption2.weight(.semibold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(.red.opacity(0.85), in: Capsule())
@@ -497,8 +504,8 @@ private struct CardFace: View {
         .frame(height: 210)
         .background(gradient)
         // A requires-online or suspended card renders frozen — desaturated, dimmed.
-        .saturation(card.requiresOnline || isSuspended ? 0 : 1)
-        .opacity(card.requiresOnline || isSuspended ? 0.55 : 1)
+        .saturation(card.requiresOnline || card.cardDataMissing || isSuspended ? 0 : 1)
+        .opacity(card.requiresOnline || card.cardDataMissing || isSuspended ? 0.55 : 1)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

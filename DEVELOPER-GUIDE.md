@@ -1591,6 +1591,8 @@ again.
 
 **`deviceNotBound`** — `true` (default `false`) when the backend refused this card's payment keys because the card was added on a **different device** — or on this phone before the app was reinstalled. Payment keys are issued for a card only to the device it was added on; on this refusal the SDK remembers it for that card, stops all automatic key requests for it (top-up, refresh, maintenance), and `requiresOnline` is always `false` while it is set. Going online does not help, and neither does a smaller amount. Render the card unavailable and tell the user to **add this card again on this phone** — not to connect. The flag clears only when the card is removed.
 
+**`cardDataMissing`** — the same field as Android and React Native: `true` when a card's payment data is no longer on the phone, so it must be removed and added again. On iOS a card is listed only while its payment data is stored, so this is always `false`.
+
 #### Handling token states in your UI
 
 A card is not simply "there or not" — it can be awaiting activation, frozen for a refresh, or suspended server-side. Derive one display state per card, in this precedence order, every time you render the wallet:
@@ -3242,6 +3244,7 @@ public struct Token {                       // a token (tokenised card) in this 
     let activationMethods: [ActivationMethodInfo]?   // how to activate, when requiresActivation
     let requiresOnline: Bool                // grey out + prompt to connect
     let deviceNotBound: Bool                // added on another device: grey out + "add this card again on this phone"
+    let cardDataMissing: Bool               // the card's payment data is not on this phone; always false on iOS
 }
 public enum TokenStatus { case active, pendingActivation, suspended, deactivated, expired, unknown(raw: String); var rawValue: String }
 public enum CardScheme: String { case iventurePay, visa, mastercard, amex, discover, unknown }

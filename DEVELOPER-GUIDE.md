@@ -1574,6 +1574,15 @@ let active = try await wallet.activeToken()                 // Token? — the on
 let card = try await wallet.token(tokenUniqueReference)     // Token? — nil when not in this wallet
 ```
 
+The selection is stored on the phone for the signed-in customer. It survives repeated `configure`
+calls and an app restart, and a read straight after `setActiveToken` sees it: no delay is needed.
+The first card added to an empty wallet is selected for you, and a card is fully stored before
+`digitise` returns its result (`DigitiseResult.tokenStored` says so).
+
+With nobody signed in (after `signOut()`) these calls throw `VeyraError.notSignedIn`; they do not
+return `nil`. Do not show that error as "no card": call `configure` with the customer and read
+again.
+
 `Token` — the same type, with the same fields, as Android and React Native `Token`: `tokenUniqueReference`, `panLastFour`, `maskedPAN`, `expiry` (`MM/YY`), `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `bankName`, `cardScheme` (`CardScheme?`: `.iventurePay`, `.visa`, `.mastercard`, `.amex`, `.discover`, `.unknown`), `status` (`TokenStatus?` — the lifecycle status as the SDK last saw it: `.active`, `.pendingActivation`, `.suspended`, `.deactivated`, `.expired`, or `.unknown(raw:)` for a value this build does not know; `nil` when the token has never been status-synced), `isActive` (the token is activated and **can pay**), `isSelected` (the token payments use — `setActiveToken(_:)`; at most one is selected), `requiresActivation`, `activationMethods` (`[ActivationMethodInfo]?` — how to activate, when `requiresActivation`), `requiresOnline`, `deviceNotBound`. It carries no card data: the token material stays in secure storage.
 
 **`isActive` and `isSelected` are two questions.** `isSelected` is "the card payments use"; `isActive` is "this card is activated and may pay". Pick the card to show as the payment card with `isSelected`, and gate payment on it being payable.
@@ -1581,6 +1590,8 @@ let card = try await wallet.token(tokenUniqueReference)     // Token? — nil wh
 **`requiresOnline`** — `true` when the card cannot pay until the wallet has been **online** to refresh it. Render the card greyed-out and non-tappable and prompt the user to connect; the flag derives fresh on every read and clears on its own once the SDK's automatic refresh succeeds. There is no manual "refresh keys" call — key management is entirely SDK-owned.
 
 **`deviceNotBound`** — `true` (default `false`) when the backend refused this card's payment keys because the card was added on a **different device** — or on this phone before the app was reinstalled. Payment keys are issued for a card only to the device it was added on; on this refusal the SDK remembers it for that card, stops all automatic key requests for it (top-up, refresh, maintenance), and `requiresOnline` is always `false` while it is set. Going online does not help, and neither does a smaller amount. Render the card unavailable and tell the user to **add this card again on this phone** — not to connect. The flag clears only when the card is removed.
+
+**`cardDataMissing`** — the same field as Android and React Native: `true` when a card's payment data is no longer on the phone, so it must be removed and added again. On iOS a card is listed only while its payment data is stored, so this is always `false`.
 
 #### Handling token states in your UI
 
@@ -3233,6 +3244,7 @@ public struct Token {                       // a token (tokenised card) in this 
     let activationMethods: [ActivationMethodInfo]?   // how to activate, when requiresActivation
     let requiresOnline: Bool                // grey out + prompt to connect
     let deviceNotBound: Bool                // added on another device: grey out + "add this card again on this phone"
+    let cardDataMissing: Bool               // the card's payment data is not on this phone; always false on iOS
 }
 public enum TokenStatus { case active, pendingActivation, suspended, deactivated, expired, unknown(raw: String); var rawValue: String }
 public enum CardScheme: String { case iventurePay, visa, mastercard, amex, discover, unknown }

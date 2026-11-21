@@ -76,7 +76,7 @@ In Xcode, open *File → Add Package Dependencies*, paste the repository URL, an
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "3.0.6"),
+    .package(url: "https://github.com/Iventure-Tech/veyra-sdk-ios", from: "3.0.7"),
 ]
 ```
 

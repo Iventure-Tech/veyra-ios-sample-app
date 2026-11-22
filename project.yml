@@ -41,6 +41,9 @@ targets:
         # the payment. The camera also scans receipt QRs to save them to the wallet.
         NSCameraUsageDescription: Scan a merchant's QR code to pay, or scan a receipt QR to save it to your Veyra wallet.
         NSFaceIDUsageDescription: Confirm payments with Face ID.
+        # Asked once before the first payment or card added (LocationAsk); the Veyra SDKs send it
+        # with each payment's fraud evidence and never ask themselves.
+        NSLocationWhenInUseUsageDescription: Your location is sent with each payment and card you add, to help check that each payment is really yours.
         # Veyra AID only — the app reads Veyra's own payment application, no scheme cards.
         com.apple.developer.nfc.readersession.iso7816.select-identifiers:
           - "A000000891010104"

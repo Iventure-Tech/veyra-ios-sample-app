@@ -129,6 +129,11 @@ struct HomeView: View {
     @State private var merchantActionMessage: String?
     @State private var signedIn = DemoSession.isSignedIn
     @State private var customerID = DemoSession.customerID
+    // Location, asked once before the first payment or card added (see LocationAsk). Both sides start
+    // payments, and Pay adds cards, so the ask runs before either screen opens.
+    @ObservedObject private var locationAsk = LocationAsk.shared
+    @State private var showGetPaid = false
+    @State private var showPay = false
 
     var body: some View {
         ZStack {
@@ -148,8 +153,8 @@ struct HomeView: View {
                         .font(.footnote).foregroundStyle(.gray)
                 }
                 Spacer()
-                NavigationLink {
-                    GetPaidView()
+                Button {
+                    locationAsk.beforePayment { showGetPaid = true }
                 } label: {
                     HomeTile(
                         title: "Get paid",
@@ -162,8 +167,8 @@ struct HomeView: View {
                 }
                 .disabled(!registered)
                 .opacity(registered ? 1 : 0.45)
-                NavigationLink {
-                    PayView()
+                Button {
+                    locationAsk.beforePayment { showPay = true }
                 } label: {
                     HomeTile(title: "Pay", subtitle: "Wallet — add a card: choose your bank")
                 }
@@ -220,13 +225,31 @@ struct HomeView: View {
         // iOS 15 floor: navigationDestination(isPresented:) is 16-only, so drive the push with
         // the pre-16 NavigationLink(isActive:) pattern (hidden link, same $showMerchantSettings).
         .background(
-            NavigationLink(isActive: $showMerchantSettings) {
-                MerchantSettingsView()
-            } label: {
-                EmptyView()
+            ZStack {
+                NavigationLink(isActive: $showMerchantSettings) {
+                    MerchantSettingsView()
+                } label: {
+                    EmptyView()
+                }
+                NavigationLink(isActive: $showGetPaid) {
+                    GetPaidView()
+                } label: {
+                    EmptyView()
+                }
+                NavigationLink(isActive: $showPay) {
+                    PayView()
+                } label: {
+                    EmptyView()
+                }
             }
             .hidden()
         )
+        .alert(LocationAsk.title, isPresented: $locationAsk.explaining) {
+            Button("Not now", role: .cancel) { locationAsk.notNow() }
+            Button("Continue") { locationAsk.continueTapped() }
+        } message: {
+            Text(LocationAsk.message)
+        }
         .onAppear { refresh() }
     }
 

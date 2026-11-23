@@ -2877,6 +2877,7 @@ lookup itself fails, the `VeyraLookup` (or `ReconcileResult`) carries a `failure
 | Add card (`digitise`, `verifyAccount`) | `APPROVED` | `APPROVED` | — | The card is added and active (`isApproved`) |
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | The cause, when there is one (e.g. `ACCOUNT_NAME_MISMATCH`) | Added, but the customer must activate it (`requiresActivation`); run [activation](#activation) with the returned `activationMethods` |
 | Add card | `DECLINED` | `DECLINED` | The issuer's reason — see below | The issuer refused this account; show the reason. The flow ends |
+| Add card | `DECLINED` | `DECLINED` | `SUSPECTED_FRAUD` | Veyra's fraud checks refused this add-card before anything was created; no card is stored. Don't retry automatically; tell the customer the card can't be added and to contact their bank |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | The token service could not complete it; start a new add-card |
 | Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer ([Table A](#table-a--outcomes-the-sdk-itself-produces)). The card may have been created without reaching the phone: switch it off with `deactivateDigitise(clientRequestID: result.clientRequestID!)`, then start a new add-card |
 | Add card | `FAILED` | `DECLINED` | `BVN_REQUIRED` | No BVN was sent and your payment app provider is not registered as the account issuer; nothing was created. Collect the customer's BVN and add the card again |

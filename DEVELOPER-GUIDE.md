@@ -69,7 +69,7 @@ Granting location is the one thing your app controls.
 
 | Group | Signals |
 |---|---|
-| Phone and app | iOS version and build, hardware model, your app's bundle id, version and build, the team id you configured (`appleTeamID`), the SDK version, uptime; on card calls, when the app was first installed |
+| Phone and app | form factor (phone, tablet, watch or other), iOS version and build, hardware model, your app's bundle id, version and build, the team id you configured (`appleTeamID`), the SDK version, uptime; on card calls, when the app was first installed |
 | Integrity | jailbroken (and what was found), simulator, debugger attached, a hooking framework in the process |
 | Location | position, accuracy, age of the fix, mock location (iOS 15 and later); only with your app's location permission |
 | Network | network type (Wi-Fi, cellular), VPN active, the phone's public IP address |
@@ -108,6 +108,26 @@ the network changes, and keeps the answer for 5 minutes. It is the one request t
 your connection to Veyra, and a payment never waits for it. If your network allow-lists outbound
 hosts, add `www.cloudflare.com`; if it is blocked, the IP goes as `TIMEOUT` or `ERROR`.
 
+### Payment evidence on a customer QR
+
+The customer's phone also proves itself on each payment. In the customer QR, the wallet adds a short
+sealed record to the card data: the phone's evidence for this payment, signed by a key the SDK makes
+for the card in the Secure Enclave and sealed so only Veyra can open it. The merchant's phone carries
+it unread; the SoftPOS SDK forwards it with the payment. Veyra checks the signature and that it
+belongs to this payment, then uses it as it uses the rest of the evidence: a payment whose evidence is
+missing or invalid is flagged, and the two phones' positions are compared.
+
+- **Nothing to call.** The key is made when a card is added and renewed at each key refresh. A card
+  added with an SDK before 3.0.9 carries no evidence until its next key refresh.
+- **A passcode is needed.** The key signs only while the phone is unlocked and has a passcode set; the
+  customer is never asked. Without a passcode, the QR goes without evidence.
+- **How the customer unlocked.** iOS doesn't say whether Face ID, Touch ID or the passcode answered, so
+  the evidence says when the customer last authenticated and gives the method as unknown.
+- **Both sides need 3.0.9.** A merchant app on an older SoftPOS SDK ignores the record, and the payment
+  goes ahead without evidence.
+- **What's in it:** the same facts as the table above (including location, when your app has it), the
+  form factor, and when the customer last authenticated.
+
 ### Your privacy disclosures
 
 Declare this in your App Store privacy details and your privacy policy, as data collected for fraud
@@ -116,7 +136,7 @@ prevention and security and sent to Veyra with the payment:
 - location, precise or approximate, when your app has the permission;
 - device and app information: hardware model, iOS version and build, bundle id and version;
 - the phone's public IP address, which Cloudflare also sees when the SDK looks it up;
-- the device-state facts in the table above.
+- the device-state facts in the table above, which also travel, sealed, inside each customer QR.
 
 The SDK reads nothing on other apps' screens and nothing about their content.
 

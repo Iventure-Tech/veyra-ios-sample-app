@@ -44,9 +44,101 @@ Everything the SDK keeps on the device belongs to **one customer** — the one y
 | `NFCReaderUsageDescription` | e.g. "Accept a contactless payment from your customer's Veyra wallet." — required for tap acceptance |
 | `NSCameraUsageDescription` | e.g. "Scan a merchant's QR code to pay, or scan a receipt QR." — required for the QR-scanning flows |
 | `NSFaceIDUsageDescription` | e.g. "Confirm payments with Face ID." — required for payment confirmation |
+| `NSLocationWhenInUseUsageDescription` | e.g. "Your location is sent with each payment and card you add, to help check that each payment is really yours." — needed to ask for location, see [Location](#location) |
 | `com.apple.developer.nfc.readersession.iso7816.select-identifiers` | Must contain the Veyra application identifier **`A000000891010104`** — the tap reader selects Veyra's own application (no scheme cards are read) |
 
 **Entitlements:** `com.apple.developer.nfc.readersession.formats` = `TAG` (for tap acceptance). No background modes are required — all SDK maintenance runs while your app is in the foreground.
+
+---
+
+## Device evidence for fraud checks
+
+From SDK 3.0.9, every call that starts or supports a payment, or adds a card, carries a block of
+evidence about the phone. On the merchant's phone that is the tap, the customer-QR charge, the QR
+create and registration; on the customer's phone, eligibility, add card, activation, key refresh,
+scan-to-pay and show-QR. The SDK collects and sends it itself: there is nothing to call, and nothing
+turns it off. On every call where the phone proves itself (all but eligibility), its Secure Enclave
+key signs the evidence with the request, so it can't be altered on the way.
+
+The fraud checks trust a phone that sends its evidence more than one that doesn't. A signal the SDK
+can't read is sent as unavailable with its reason (`NOT_SUPPORTED_ON_PLATFORM`, `PERMISSION_DENIED`,
+`TIMEOUT`, `NO_BASELINE` or `ERROR`), never guessed, and a missing signal counts against the payment.
+Granting location is the one thing your app controls.
+
+### What is sent
+
+| Group | Signals |
+|---|---|
+| Phone and app | form factor (phone, tablet, watch or other), iOS version and build, hardware model, your app's bundle id, version and build, the team id you configured (`appleTeamID`), the SDK version, uptime; on card calls, when the app was first installed |
+| Integrity | jailbroken (and what was found), simulator, debugger attached, a hooking framework in the process |
+| Location | position, accuracy, age of the fix, mock location (iOS 15 and later); only with your app's location permission |
+| Network | network type (Wi-Fi, cellular), VPN active, the phone's public IP address |
+| During the call | a phone or VoIP call in progress, screen recording, mirroring or AirPlay, a passcode set |
+| Per call | tap: the card exchange's duration and command count; customer-QR charge: time from scan to submit; scan-to-pay: time from scan to confirm, where the amount came from, how the customer confirmed, a screenshot taken while paying; key refresh: biometric enrolment changed, payments since the last refresh |
+
+Sent as `NOT_SUPPORTED_ON_PLATFORM` on iOS, because iOS doesn't expose them or has no equivalent:
+security patch level, app signing digest (App Attest proves the app instead), developer options, USB
+debugging, SIM details, accessibility services and overlays. `NO_BASELINE` is normal: it means there
+was nothing yet to compare with (a first key refresh).
+
+### Location
+
+The SDK never asks for a permission. It sends the phone's location when your app already holds
+"While Using" access, and `PERMISSION_DENIED` when it doesn't.
+
+- **Add `NSLocationWhenInUseUsageDescription`** to your Info.plist, saying why in your users' terms.
+- **Ask before the first payment or card added, with a short explanation first**, then call
+  `requestWhenInUseAuthorization()`. Never block the payment on the answer. The sample does this once,
+  from its home screen, in [`LocationAsk.swift`](VeyraBank/LocationAsk.swift).
+- **Precise is better.** The fraud checks compare where the merchant's and the customer's iPhones
+  are, within a couple of hundred metres. With "Precise Location" off, iOS gives a position that can
+  be off by kilometres.
+- **A fresh fix at payment start.** When a payment starts on the customer's phone, and whenever the
+  merchant's app comes to the foreground, the SDK asks Core Location for a ten-metre position and
+  stops after 2 seconds; the payment never waits for it. Without one, the last known position goes,
+  with its age.
+
+No other Info.plist key or entitlement is needed for the evidence.
+
+### The public IP lookup
+
+A phone can't read its own public IP, so the SDK asks Cloudflare
+(`https://www.cloudflare.com/cdn-cgi/trace`) at start, when the app comes to the foreground and when
+the network changes, and keeps the answer for 5 minutes. It is the one request the SDK makes outside
+your connection to Veyra, and a payment never waits for it. If your network allow-lists outbound
+hosts, add `www.cloudflare.com`; if it is blocked, the IP goes as `TIMEOUT` or `ERROR`.
+
+### Payment evidence on a customer QR
+
+The customer's phone also proves itself on each payment. In the customer QR, the wallet adds a short
+sealed record to the card data: the phone's evidence for this payment, signed by a key the SDK makes
+for the card in the Secure Enclave and sealed so only Veyra can open it. The merchant's phone carries
+it unread; the SoftPOS SDK forwards it with the payment. Veyra checks the signature and that it
+belongs to this payment, then uses it as it uses the rest of the evidence: a payment whose evidence is
+missing or invalid is flagged, and the two phones' positions are compared.
+
+- **Nothing to call.** The key is made when a card is added and renewed at each key refresh. A card
+  added with an SDK before 3.0.9 carries no evidence until its next key refresh.
+- **A passcode is needed.** The key signs only while the phone is unlocked and has a passcode set; the
+  customer is never asked. Without a passcode, the QR goes without evidence.
+- **How the customer unlocked.** iOS doesn't say whether Face ID, Touch ID or the passcode answered, so
+  the evidence says when the customer last authenticated and gives the method as unknown.
+- **Both sides need 3.0.9.** A merchant app on an older SoftPOS SDK ignores the record, and the payment
+  goes ahead without evidence.
+- **What's in it:** the same facts as the table above (including location, when your app has it), the
+  form factor, and when the customer last authenticated.
+
+### Your privacy disclosures
+
+Declare this in your App Store privacy details and your privacy policy, as data collected for fraud
+prevention and security and sent to Veyra with the payment:
+
+- location, precise or approximate, when your app has the permission;
+- device and app information: hardware model, iOS version and build, bundle id and version;
+- the phone's public IP address, which Cloudflare also sees when the SDK looks it up;
+- the device-state facts in the table above, which also travel, sealed, inside each customer QR.
+
+The SDK reads nothing on other apps' screens and nothing about their content.
 
 ---
 
@@ -2785,6 +2877,7 @@ lookup itself fails, the `VeyraLookup` (or `ReconcileResult`) carries a `failure
 | Add card (`digitise`, `verifyAccount`) | `APPROVED` | `APPROVED` | — | The card is added and active (`isApproved`) |
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | The cause, when there is one (e.g. `ACCOUNT_NAME_MISMATCH`) | Added, but the customer must activate it (`requiresActivation`); run [activation](#activation) with the returned `activationMethods` |
 | Add card | `DECLINED` | `DECLINED` | The issuer's reason — see below | The issuer refused this account; show the reason. The flow ends |
+| Add card | `DECLINED` | `DECLINED` | `SUSPECTED_FRAUD` | Veyra's fraud checks refused this add-card before anything was created; no card is stored. Don't retry automatically; tell the customer the card can't be added and to contact their bank |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | The token service could not complete it; start a new add-card |
 | Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer ([Table A](#table-a--outcomes-the-sdk-itself-produces)). The card may have been created without reaching the phone: switch it off with `deactivateDigitise(clientRequestID: result.clientRequestID!)`, then start a new add-card |
 | Add card | `FAILED` | `DECLINED` | `BVN_REQUIRED` | No BVN was sent and your payment app provider is not registered as the account issuer; nothing was created. Collect the customer's BVN and add the card again |

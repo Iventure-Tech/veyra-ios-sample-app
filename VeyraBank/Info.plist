@@ -24,6 +24,8 @@
 	<string>Scan a merchant's QR code to pay, or scan a receipt QR to save it to your Veyra wallet.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Confirm payments with Face ID.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Your location is sent with each payment and card you add, to help check that each payment is really yours.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>VeyraAppleTeamID</key>
@@ -34,18 +36,18 @@
 	<string>$(VEYRA_BANK_CLIENT_ID)</string>
 	<key>VeyraBankClientSecret</key>
 	<string>$(VEYRA_BANK_CLIENT_SECRET)</string>
-	<key>VeyraUsername</key>
-	<string>$(VEYRA_USERNAME)</string>
-	<key>VeyraPassword</key>
-	<string>$(VEYRA_PASSWORD)</string>
 	<key>VeyraClientID</key>
 	<string>$(VEYRA_CLIENT_ID)</string>
 	<key>VeyraClientSecret</key>
 	<string>$(VEYRA_CLIENT_SECRET)</string>
+	<key>VeyraPassword</key>
+	<string>$(VEYRA_PASSWORD)</string>
 	<key>VeyraPaymentAppProviderID</key>
 	<string>$(VEYRA_PAYMENT_APP_PROVIDER_ID)</string>
 	<key>VeyraTokenRequestorID</key>
 	<string>$(VEYRA_TOKEN_REQUESTOR_ID)</string>
+	<key>VeyraUsername</key>
+	<string>$(VEYRA_USERNAME)</string>
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
 		<string>A000000891010104</string>

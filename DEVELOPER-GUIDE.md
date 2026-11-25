@@ -453,6 +453,7 @@ let softposConfig = VeyraSoftPOSConfiguration(
 | `environment` | **Mandatory** | `.test` or `.live`. Endpoints resolve from the SDK's defaults — no URLs to supply. |
 | `paymentAppProviderID` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet configuration's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. |
 | `requestTimeoutSeconds` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). `nil` means 60 s. See [Request timeout](#request-timeout). |
+| `statusPollFirstGapSeconds` | Optional | How often the SoftPOS SDK checks an open payment's status in the first 2 minutes after its status last changed, in seconds. `nil` means 5 s; a value below 2 is raised to 2, and the SDK logs one warning. See [How the SDK waits](#softpostransactions--transaction). |
 
 ### `VeyraWalletConfiguration`
 
@@ -998,7 +999,18 @@ label.
 
 **Every attempt is its own row.** An order paid on the second try shows two rows with the same `merchantOrderID` — for example a `RETRY` row followed by an `APPROVED` one, each with its own `merchantTransactionReference`. Group rows by `merchantOrderID` if your screen shows orders rather than attempts, and decide what the order is with the rule in [The merchant order ID](#the-merchant-order-id), never by taking the newest row.
 
-**How the SDK waits for a `PENDING` or `ACCEPTED` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own, with **exponential backoff**: the first re-checks come within seconds (most payments settle at once) and the interval doubles to a steady state of roughly **once an hour**. It keeps that up for **30 days** from the transaction date, and then stops asking.
+**How the SDK waits for a `PENDING` or `ACCEPTED` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own. Each payment is timed from **when its status last changed** (when it was taken, and again at each change, `PENDING` → `ACCEPTED` say), and the wait is counted from when the previous answer came back, so the SDK never has two checks out for one payment:
+
+| Since the last status change | The SDK checks every |
+|---|---|
+| under 2 minutes | 5 s, or the `statusPollFirstGapSeconds` you set (at least 2 s) |
+| 2–5 minutes | 10 s |
+| 5–10 minutes | 30 s |
+| 10–60 minutes | 5 minutes |
+| 1–24 hours | 30 minutes |
+| after that | once a day |
+
+A check that fails (no network, a timeout) doesn't restart the clock, and waits twice the gap. A payment handed to a person for reconciliation is checked at most every 2 minutes. The SDK keeps this up for **30 days** from the transaction date, then stops asking. iOS pauses the checks while your app is suspended; when it comes back, every check that fell due meanwhile goes at once. `observeTransactionResolved` fires when a check finds `ACCEPTED` (or the payment's own answer was `ACCEPTED`) and again at the final status, so your app needs no polling loop of its own.
 
 **Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. The same holds for an `ACCEPTED` row. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is.
 

@@ -44,6 +44,9 @@ enum SampleConfig {
             // Invalid connection config is a setup error: fail loudly, naming the field.
             fatalError("Veyra SDK configuration failed: \(error.localizedDescription)")
         }
+        // App-scope payment events, re-registered on every sign-in (the SDKs drop them on
+        // sign-out and on a customer switch).
+        PaymentEventLog.register()
         // Clearing the SoftPOS merchant on uninstall is the SDK's job (the merchant profile
         // lives in a sandboxed protected file the OS removes with the app), so no
         // first-launch wipe is needed here.

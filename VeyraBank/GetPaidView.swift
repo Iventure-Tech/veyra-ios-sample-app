@@ -33,6 +33,9 @@ struct GetPaidView: View {
     /// anything between customers, but should have time to read the outcome to the customer.
     /// Done returns immediately, throughout the hold.
     private static let autoReturnDelayNanos: UInt64 = 60_000_000_000
+    // How often the QR page re-reads the sale's stored row. A read of the phone's own store:
+    // nothing is sent. How often the gateway is asked is the SDK's business, not this screen's.
+    private static let qrRowWatchNanos: UInt64 = 1_000_000_000
 
     @Environment(\.presentationMode) private var presentationMode
     @State private var page: Page = .amountEntry
@@ -76,7 +79,7 @@ struct GetPaidView: View {
     @State private var customerQrScanHint: String?
     @State private var merchant: StoredMerchant?
     @State private var amountText = ""
-    // Live MPM rail: context create → QR render → lifecycle polling.
+    // Live MPM rail: context create → QR render → stored-row watch.
     private enum QrState {
         case creating
         case live(UIImage)
@@ -84,6 +87,9 @@ struct GetPaidView: View {
         case settled(approved: Bool, responseCode: String?)
         /// The push was accepted (customer debited, credit queued): the QR is down, not final yet.
         case accepted
+        /// Claimed-PENDING: a wallet has claimed the QR and its payment has no outcome yet. The QR
+        /// is down; the page waits for the outcome.
+        case claimedPending
     }
     @State private var qrState: QrState = .creating
     @State private var qrTask: Task<Void, Never>?
@@ -313,7 +319,7 @@ struct GetPaidView: View {
                 .font(.system(size: 44, weight: .bold))
                 .foregroundStyle(.white)
             // The QR is the gateway-signed PaymentContext
-            // from createContext; the outcome arrives via context lifecycle polling.
+            // from createContext; the outcome arrives on the sale's stored row.
             switch qrState {
             case .creating:
                 RoundedRectangle(cornerRadius: 14)
@@ -367,6 +373,18 @@ struct GetPaidView: View {
                         EmptyView()
                     }
                     viewReceiptButton
+                }
+            case .claimedPending:
+                VStack(spacing: 8) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 64))
+                        .foregroundStyle(.orange)
+                    Text("Payment pending")
+                        .font(.title3).bold()
+                        .foregroundStyle(.white)
+                    Text("A customer has scanned this code and the payment is being processed. Wait for approval before releasing goods. The app keeps checking and will show the result here.")
+                        .font(.footnote).foregroundStyle(.gray)
+                        .multilineTextAlignment(.center).padding(.horizontal)
                 }
             case .accepted:
                 if let outcome = acceptedOutcome {
@@ -436,12 +454,13 @@ struct GetPaidView: View {
     /// Terminal QR outcomes (settled either way, expired, create failed) — Done + auto-return.
     private var qrFinished: Bool {
         switch qrState {
-        case .settled, .failed, .accepted: return true
+        case .settled, .failed, .accepted, .claimedPending: return true
         case .creating, .live: return false
         }
     }
 
-    /// Create the gateway-signed context, render it, and poll until the push settles.
+    /// Create the gateway-signed context, render it, and watch the sale's stored row until the
+    /// push is claimed, settles or the QR expires. The SDK does the asking.
     private func startQrPayment() {
         qrTask?.cancel()
         qrState = .creating
@@ -467,7 +486,7 @@ struct GetPaidView: View {
                     onExpired: {
                         // The SDK owns the expiry timer; drop the live QR to the expired
                         // placeholder the moment it fires (an expired QR must not stay
-                        // scannable), rather than waiting for the next server poll.
+                        // scannable), rather than waiting for the SDK's next check to drop the row.
                         qrState = .failed("This payment code has expired — please start a new payment")
                         scheduleAutoReturn()
                     }
@@ -499,46 +518,44 @@ struct GetPaidView: View {
                     return
                 }
                 qrState = .live(image)
-                while !Task.isCancelled {
-                    try await Task.sleep(nanoseconds: 2_500_000_000)
-                    // A poll that could not be made carries a reason and no state: just ask again.
-                    guard let status = try? await VeyraSoftPOS.shared.contextStatus(txRef: txRef).value else {
+                // Watch the sale's stored row until the QR is used or gone. The SDK checks the QR
+                // with the gateway by itself, as often as the gateway asks it to, and writes each
+                // answer onto the row. This loop reads the phone's own store and sends nothing.
+                watch: while !Task.isCancelled {
+                    try await Task.sleep(nanoseconds: Self.qrRowWatchNanos)
+                    // Only a setup mistake throws; it says nothing about the row.
+                    let row: MerchantTransaction?
+                    do {
+                        row = try await VeyraSoftPOS.shared.transaction(merchantTransactionReference: txRef)
+                    } catch {
                         continue
                     }
-                    if status.isSettled {
-                        // The MPM context's txRef is the recorded transaction's reference.
-                        lastPaymentReference = txRef
-                        // Settled — stop the expiry watch so it can't overwrite the outcome later.
-                        VeyraSoftPOS.shared.cancelQrExpiry()
-                        qrState = .settled(approved: status.isApproved, responseCode: status.responseCode)
-                        // An approved MPM sale waits on credit confirmation too. The
-                        // settle itself can't say whether the bank supports it (the contexts
-                        // endpoint has no credit fields) — the SDK's settle reconciler learns the
-                        // fields from the transaction-status rail moments later and its sweep does
-                        // the polling, so this screen just watches the stored row. The normal 60s
-                        // hold is armed either way; the watch cancels it if the row turns out to
-                        // say the bank supports confirmation.
+                    switch QrRowStates.merchantQr(rowExists: row != nil, status: row?.status, isQrClaimed: row?.isQrClaimed) {
+                    case .waiting:
+                        continue
+                    case .gone:
+                        // The QR expired unpaid: the SDK drops the row, because no payment happened.
+                        qrState = .failed("This payment code has expired — please start a new payment")
                         scheduleAutoReturn()
-                        if status.isApproved {
-                            watchCreditConfirmation(reference: txRef, initialWaiting: false)
-                        }
-                        break
-                    }
-                    // Not settled. The customer's bank may have accepted the push (debited,
-                    // credit queued): the SDK puts that on the stored row, so read it. The QR
-                    // comes down and the page waits for the final status.
-                    let row = try? await VeyraSoftPOS.shared.transaction(merchantTransactionReference: txRef)
-                    if row?.status == ResponseStatus.accepted {
+                        break watch
+                    case .accepted:
+                        // The customer's bank accepted the push (debited, credit queued). The QR
+                        // comes down and the page waits for the final status.
                         lastPaymentReference = txRef
                         VeyraSoftPOS.shared.cancelQrExpiry()
                         qrState = .accepted
                         watchAcceptedPayment(reference: txRef)
-                        break
-                    }
-                    if status.state == "EXPIRED" {
-                        qrState = .failed("This payment code has expired — please start a new payment")
-                        scheduleAutoReturn()
-                        break
+                        break watch
+                    case .final:
+                        showQrSaleSettled(reference: txRef, row: row)
+                        break watch
+                    case .claimedPending:
+                        // A wallet has claimed the QR and its payment has no outcome yet: nobody
+                        // else can pay this code, so it comes down and the page waits.
+                        VeyraSoftPOS.shared.cancelQrExpiry()
+                        qrState = .claimedPending
+                        watchClaimedPendingPayment(reference: txRef)
+                        break watch
                     }
                 }
             } catch is CancellationError {
@@ -547,6 +564,66 @@ struct GetPaidView: View {
                 // Only a setup mistake throws.
                 qrState = .failed("Could not create the payment code: \(error.localizedDescription)")
                 scheduleAutoReturn()
+            }
+        }
+    }
+
+    /// A merchant QR sale reached its final status: approved, or not (declined, failed).
+    private func showQrSaleSettled(reference: String, row: MerchantTransaction?) {
+        let approved = row?.status == ResponseStatus.approved
+        // The QR's reference is the recorded transaction's reference.
+        lastPaymentReference = reference
+        // Settled: stop the expiry watch so it can't overwrite the outcome later.
+        VeyraSoftPOS.shared.cancelQrExpiry()
+        qrState = .settled(approved: approved, responseCode: row?.responseCode)
+        // An approved sale waits on credit confirmation too. The row learns whether the bank
+        // supports it moments after the approval and the SDK does the checking, so this screen
+        // just watches the stored row. The normal 60s hold is armed either way; the watch cancels
+        // it if the row turns out to say the bank supports confirmation.
+        scheduleAutoReturn()
+        if approved {
+            watchCreditConfirmation(reference: reference, initialWaiting: row?.isCreditConfirmationSupported == true)
+        }
+    }
+
+    /// Claimed-PENDING: a customer's wallet has claimed the QR and its payment has no outcome yet.
+    /// The QR is down; hold the page (no auto-return) and re-read the sale's stored row until it
+    /// says more. Render-only: the SDK owns the checking and keeps at it when this screen is gone.
+    private func watchClaimedPendingPayment(reference: String) {
+        acceptedWatchTask?.cancel()
+        cancelAutoReturn()
+        acceptedWatchTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.qrRowWatchNanos)
+                guard !Task.isCancelled else { return }
+                let row: MerchantTransaction?
+                do {
+                    row = try await VeyraSoftPOS.shared.transaction(merchantTransactionReference: reference)
+                } catch {
+                    continue
+                }
+                switch QrRowStates.merchantQr(rowExists: row != nil, status: row?.status, isQrClaimed: row?.isQrClaimed) {
+                case .claimedPending:
+                    continue
+                case .accepted:
+                    // Debited, credit queued: the accepted page takes over the wait.
+                    acceptedWatchTask = nil
+                    lastPaymentReference = reference
+                    qrState = .accepted
+                    watchAcceptedPayment(reference: reference)
+                    return
+                case .final:
+                    acceptedWatchTask = nil
+                    showQrSaleSettled(reference: reference, row: row)
+                    return
+                case .waiting, .gone:
+                    // The wallet's payment was never sent to its bank, so the gateway released
+                    // the QR (or it has since expired unpaid). Nothing was charged.
+                    acceptedWatchTask = nil
+                    qrState = .failed("The customer's payment was not sent to their bank and nothing was charged — please start a new payment")
+                    scheduleAutoReturn()
+                    return
+                }
             }
         }
     }

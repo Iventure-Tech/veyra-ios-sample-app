@@ -8,6 +8,9 @@ import SwiftUI
 import VeyraWallet
 
 struct ShowToPayView: View {
+    // How often the shown QR re-reads its payment's stored row. A read of the phone's own store:
+    // nothing is sent. How often the gateway is asked is the SDK's business.
+    private static let rowWatchNanos: UInt64 = 1_000_000_000
     private enum Phase {
         case amountEntry
         case working
@@ -22,9 +25,12 @@ struct ShowToPayView: View {
     // The merchant charged this QR and the bank accepted it: debited, credit queued. Not final,
     // but the QR is used, so it comes down while the wait for the final status continues.
     @State private var accepted = false
-    // The outcome arrives via the gateway reconcile — poll while the QR is
-    // up instead of waiting for a scene-active/Transactions-list visit that may never come.
-    @State private var reconcileTask: Task<Void, Never>?
+    // The merchant charged this QR and the payment has no outcome yet. The QR is used, so it comes
+    // down while the wait for the outcome continues.
+    @State private var charged = false
+    // The outcome arrives on the payment's stored row, which the SDK keeps up to date. Watch the
+    // row while the QR is up; this screen sends nothing.
+    @State private var rowWatchTask: Task<Void, Never>?
     @State private var settled: (approved: Bool, merchantName: String?)?
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -43,8 +49,8 @@ struct ShowToPayView: View {
         .navigationTitle("Show QR to pay")
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear {
-            reconcileTask?.cancel()
-            reconcileTask = nil
+            rowWatchTask?.cancel()
+            rowWatchTask = nil
             // Stop the SDK's expiry watch so its callback can't fire into a dismissed view.
             VeyraWallet.shared.cancelQrExpiry()
         }
@@ -86,11 +92,11 @@ struct ShowToPayView: View {
             // device could scan a no-longer-valid code. Swap the payload for an opaque placeholder
             // so nothing decodable remains on screen.
             Group {
-                if expired || settled != nil || accepted {
+                if expired || settled != nil || accepted || charged {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color(uiColor: .secondarySystemBackground))
-                        Image(systemName: settled != nil ? "checkmark.circle" : accepted ? "clock" : "clock.badge.xmark")
+                        Image(systemName: settled != nil ? "checkmark.circle" : (accepted || charged) ? "clock" : "clock.badge.xmark")
                             .font(.system(size: 48))
                             .foregroundStyle(.secondary)
                     }
@@ -103,7 +109,7 @@ struct ShowToPayView: View {
             }
             .frame(width: 280, height: 280)
             if let settled {
-                // The gateway reconcile settled the payment while the QR was up:
+                // The payment reached its final status while the QR was up:
                 // show the outcome — with the registered merchant name when echoed.
                 Label(
                     settled.approved
@@ -117,6 +123,12 @@ struct ShowToPayView: View {
                 Label("Payment accepted - waiting for credit approval", systemImage: "clock.fill")
                     .font(.headline)
                     .foregroundStyle(.orange)
+            } else if charged {
+                Label("The merchant has charged this code - payment pending", systemImage: "clock.fill")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+                Text("Don't pay again. The result will show here and in your transactions.")
+                    .font(.footnote).foregroundStyle(.secondary)
             } else {
                 Text(expired ? "Expired — get a new QR" : "Expires in \(secondsLeft)s")
                     .font(.footnote)
@@ -185,44 +197,47 @@ struct ShowToPayView: View {
             expired = false
             settled = nil
             accepted = false
+            charged = false
             phase = .showing(qr, image)
-            startReconcilePolling(for: qr)
+            startRowWatch(for: qr)
         } catch {
             errorMessage = error.localizedDescription
             phase = .amountEntry
         }
     }
 
-    /// While the QR is displayed, check THIS payment's status every few seconds — the CPM
-    /// outcome only exists server-side once the merchant charges. Stops on settle, expiry, or
-    /// leave.
-    private func startReconcilePolling(for qr: PaymentQr) {
-        reconcileTask?.cancel()
-        // Ask about this render's own transaction hash only: one request per check.
-        // `reconcilePendingTransactions()` asks about every pending payment on the device, so
-        // calling it on a 3 s loop sends a burst of requests each time and gets the wallet
-        // throttled (429) by the gateway. The hash is unique per render, so only the row for
-        // this QR can settle the display.
-        guard let hash = qr.transactionHash else { return }
-        reconcileTask = Task { @MainActor in
-            while !Task.isCancelled && settled == nil && (!expired || accepted) {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+    /// While the QR is displayed, watch THIS payment's stored row and show what happens to it:
+    /// charged (the merchant scanned and charged the code; no outcome yet), accepted (debited,
+    /// credit queued) and the final outcome. It reads the SDK's own store on a short local timer
+    /// and makes no network call: the SDK keeps the row up to date, checking with the gateway as
+    /// often as the gateway asks. Stops on a final status or on leave.
+    private func startRowWatch(for qr: PaymentQr) {
+        rowWatchTask?.cancel()
+        // The hash is unique per render, so only the row for this QR can move the display.
+        guard let hash = qr.transactionHash, let token = qr.tokenUniqueReference else { return }
+        rowWatchTask = Task { @MainActor in
+            while !Task.isCancelled && settled == nil {
+                try? await Task.sleep(nanoseconds: Self.rowWatchNanos)
                 guard !Task.isCancelled else { return }
-                // A check that could not be made carries a failureReason; this loop just asks again.
-                if let row = try? await VeyraWallet.shared
-                    .refreshTransactionStatus(transactionHash: hash).value,
-                    // The row stays PENDING until the merchant charges — only a final status
-                    // settles the display; anything else keeps the QR up and polling.
-                    let status = row.authorizationStatus,
-                    ["APPROVED", "DECLINED", "FAILED", "ACCEPTED"].contains(status.uppercased()) {
-                    // ACCEPTED is not final: say so, and keep asking until the final status.
-                    if status.uppercased() == ResponseStatus.accepted {
-                        accepted = true
-                        continue
-                    }
-                    // Don't display the pre-backfill placeholder as a merchant name.
+                // A local read. The newest rows are enough: this payment was recorded moments ago.
+                guard let rows = try? await VeyraWallet.shared.transactions(tokenUniqueReference: token, limit: 20),
+                      let row = rows.first(where: { $0.transactionHash?.caseInsensitiveCompare(hash) == .orderedSame })
+                else { continue }
+                switch QrRowStates.shownQr(status: row.authorizationStatus, isCharged: row.isCharged) {
+                case .waiting:
+                    // Not charged yet: the QR stays up to be scanned.
+                    continue
+                case .chargedPending:
+                    // The merchant's charge has reached the gateway and has no outcome yet: the
+                    // code is used, so it comes down while the wait goes on.
+                    charged = true
+                case .accepted:
+                    // ACCEPTED is not final: say so, and keep watching for the final status.
+                    accepted = true
+                case .final:
+                    // Don't display the placeholder as a merchant name.
                     let name = row.merchantName == "QR payment" ? nil : row.merchantName
-                    settled = (approved: status == "APPROVED", merchantName: name)
+                    settled = (approved: row.authorizationStatus?.uppercased() == "APPROVED", merchantName: name)
                 }
             }
         }
